@@ -7,7 +7,7 @@ on:
 
 jobs:
   run-agent:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
 
     permissions:
@@ -30,12 +30,6 @@ jobs:
 
       - name: Install Playwright browsers
         run: python -m playwright install chromium --with-deps
-
-      - name: Install WeasyPrint system dependencies
-        run: |
-          sudo apt-get update -q
-          sudo apt-get install -y -q \
-            libpango-1.0-0 libpangoft2-1.0-0 libcairo2 libgdk-pixbuf2.0-0
 
       - name: Run job agent
         env:
