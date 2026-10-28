@@ -7,7 +7,7 @@ model can't drift from the schema. Tracks token usage for cost visibility
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional
 
 import anthropic
 
@@ -25,8 +25,10 @@ class Claude:
         self.output_tokens = 0
 
     def json_call(self, system: str, user: str, schema: dict,
-                  tool_name: str = "submit", max_tokens: int = 1024) -> dict[str, Any]:
+                  tool_name: str = "submit", max_tokens: int = 1024,
+                  temperature: Optional[float] = None) -> dict[str, Any]:
         """Return the model's structured output as a dict matching `schema`."""
+        kwargs = {} if temperature is None else {"temperature": temperature}
         resp = self.client.messages.create(
             model=self.model,
             max_tokens=max_tokens,
@@ -38,6 +40,7 @@ class Claude:
                 "input_schema": schema,
             }],
             tool_choice={"type": "tool", "name": tool_name},
+            **kwargs,
         )
         self.input_tokens += resp.usage.input_tokens
         self.output_tokens += resp.usage.output_tokens
@@ -46,10 +49,12 @@ class Claude:
                 return block.input
         raise RuntimeError("Claude returned no structured output")
 
-    def chat(self, system: str, messages: list[dict], max_tokens: int = 800) -> str:
+    def chat(self, system: str, messages: list[dict], max_tokens: int = 800,
+             temperature: Optional[float] = None) -> str:
         """Free-text turn (for the Writer's conversation)."""
+        kwargs = {} if temperature is None else {"temperature": temperature}
         resp = self.client.messages.create(
-            model=self.model, max_tokens=max_tokens, system=system, messages=messages,
+            model=self.model, max_tokens=max_tokens, system=system, messages=messages, **kwargs,
         )
         self.input_tokens += resp.usage.input_tokens
         self.output_tokens += resp.usage.output_tokens
