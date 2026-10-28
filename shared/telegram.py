@@ -20,8 +20,11 @@ class Telegram:
         self.base = f"https://api.telegram.org/bot{self.token}"
         self._http = httpx.Client(timeout=35)
 
-    def _post(self, method: str, payload: dict) -> dict:
-        r = self._http.post(f"{self.base}/{method}", json=payload)
+    def _post(self, method: str, payload: dict, http_timeout: float | None = None) -> dict:
+        kwargs = {"json": payload}
+        if http_timeout is not None:
+            kwargs["timeout"] = http_timeout
+        r = self._http.post(f"{self.base}/{method}", **kwargs)
         data = r.json()
         if not data.get("ok"):
             raise RuntimeError(f"Telegram {method} failed: {data}")
@@ -72,4 +75,5 @@ class Telegram:
         payload: dict = {"timeout": timeout, "allowed_updates": ["message", "callback_query"]}
         if offset is not None:
             payload["offset"] = offset
-        return self._post("getUpdates", payload)
+        # The HTTP read must outlast Telegram's server-side long-poll wait.
+        return self._post("getUpdates", payload, http_timeout=timeout + 15)
