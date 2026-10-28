@@ -1,146 +1,210 @@
 """
 PDF generator — HTML → PDF via Playwright (Chromium).
 
-Fonts: uses Arial/DejaVu Sans/Liberation Sans so it renders correctly on both
-macOS (local) and Ubuntu Linux (GitHub Actions). No -apple-system.
+Layout copies Liam's own resume (his reference PDF): Carlito, uppercase section
+headers with a dark rule, bold role + italic grey date on the right, small
+bullets. The cover letter reuses the same header so the pack reads as one set.
+Always one A4 page: content that overflows is scaled down to fit.
+
+Fonts: Carlito loads from Google Fonts, falling back to Lato/Calibri/Arial so it
+still renders on macOS (local) and Ubuntu (GitHub Actions) without it.
+
+CV markdown format (what the Writer produces):
+
+    # Liam Hasson
+    Product Designer
+    email · Berlin · linkedin.com/in/... · site.com
+
+    ## Summary
+    One paragraph.
+
+    ## Experience
+    ### Role, Company | Aug 2026 - Present
+    - Bullet
+
+    ## Projects
+    ### Project, Context | Dec 2025 - Feb 2026
+    _One italic line describing it._
+    - Bullet
+
+    ## Skills
+    **Tools:** Figma · Claude Code
 """
 
 from __future__ import annotations
 import asyncio
+import html as htmlmod
 import re
 from pathlib import Path
 import playwright.async_api as pw
 
 OUTPUT_DIR = Path(__file__).parent.parent.parent / "output"
 
-# Safe cross-platform font stack — works on macOS AND Ubuntu (GitHub Actions)
-FONT_STACK = '"Arial", "DejaVu Sans", "Liberation Sans", "Helvetica Neue", sans-serif'
+FONT_LINK = ('<link rel="stylesheet" href="https://fonts.googleapis.com/css2?'
+             'family=Carlito:ital,wght@0,400;0,700;1,400;1,700&display=block">')
+FONT_STACK = '"Carlito", "Lato", "Calibri", "Arial", "DejaVu Sans", sans-serif'
+
+INK = "#222222"
+MUTED = "#6b6b6b"
+CONTACT = "#555555"
+
+# Shared header: name / title / contact line, as on Liam's resume.
+HEADER_CSS = f"""
+.cv-name {{
+    font-size: 19pt;
+    font-weight: 700;
+    text-transform: uppercase;
+    line-height: 1.1;
+    color: {INK};
+}}
+.cv-subtitle {{ font-size: 10pt; color: {MUTED}; margin-top: 3px; }}
+.cv-contact {{ font-size: 8pt; color: {CONTACT}; margin-top: 4px; }}
+.cv-contact a {{ color: {CONTACT}; text-decoration: underline; text-underline-offset: 1.5px; }}
+.cv-contact .sep {{ padding: 0 5px; }}
+"""
 
 CV_CSS = f"""
-@page {{ size: A4; margin: 0; }}
+@page {{ size: A4; }}
 * {{ box-sizing: border-box; margin: 0; padding: 0; }}
 
 body {{
     font-family: {FONT_STACK};
-    font-size: 9.5pt;
-    line-height: 1.45;
-    color: #1a1a1a;
-}}
-
-/* ── CV Header ── */
-.cv-name {{
-    font-size: 22pt;
-    font-weight: 700;
-    letter-spacing: -0.5px;
-    line-height: 1.1;
-    margin-bottom: 3px;
-}}
-.cv-subtitle {{
-    font-size: 10pt;
-    font-weight: 400;
-    color: #444;
-    margin-bottom: 2px;
-}}
-.cv-contact {{
     font-size: 8.5pt;
-    color: #777;
-    margin-bottom: 10px;
+    line-height: 1.3;
+    color: {INK};
 }}
+{HEADER_CSS}
 
-/* ── Section headers ── */
+/* ── Section headers: uppercase, tracked, dark rule underneath ── */
 h2 {{
-    font-size: 7.5pt;
+    font-size: 9pt;
     font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 1px;
-    color: #111;
-    border-bottom: 1px solid #ccc;
-    padding-bottom: 2px;
+    letter-spacing: 1.2px;
+    color: {INK};
+    border-bottom: 0.75pt solid {INK};
+    padding-bottom: 3px;
     margin-top: 11px;
-    margin-bottom: 5px;
+    margin-bottom: 6px;
 }}
 
-/* ── Role header: bold title left, date right ── */
+/* ── Entry header: bold title left, italic grey date right ── */
 .role-header {{
     display: flex;
     justify-content: space-between;
     align-items: baseline;
-    margin-top: 7px;
-    margin-bottom: 2px;
+    margin-top: 6px;
 }}
-.role-title {{ font-weight: 600; font-size: 9.5pt; }}
-.role-date  {{ color: #666; font-size: 8.5pt; white-space: nowrap; padding-left: 8px; }}
+h2 + .role-header {{ margin-top: 0; }}
+.role-title {{ font-weight: 700; font-size: 9pt; }}
+.role-date  {{ font-style: italic; color: {MUTED}; font-size: 8.5pt; white-space: nowrap; padding-left: 10px; }}
+.role-desc  {{ font-style: italic; color: {MUTED}; margin-top: 2px; }}
 
-/* ── Bullet list ── */
-ul {{ list-style: none; padding-left: 0; margin-top: 2px; }}
-ul li {{
-    padding-left: 11px;
-    position: relative;
-    margin-bottom: 2px;
-    color: #222;
-}}
+/* ── Bullets ── */
+ul {{ list-style: none; margin-top: 3px; }}
+ul li {{ position: relative; padding-left: 14px; margin-bottom: 2.5px; }}
 ul li::before {{
-    content: "–";
+    content: "•";
     position: absolute;
-    left: 0;
-    color: #999;
+    left: 4px;
+    font-size: 7pt;
+    line-height: 1.6;
 }}
 
-/* ── Body text ── */
+/* ── Paragraphs + label lines (skills, languages) ── */
 p {{ margin-bottom: 3px; }}
 """
 
 COVER_LETTER_CSS = f"""
-@page {{ size: A4; margin: 0; }}
+@page {{ size: A4; }}
 * {{ box-sizing: border-box; margin: 0; padding: 0; }}
 
 body {{
     font-family: {FONT_STACK};
     font-size: 10.5pt;
-    line-height: 1.65;
-    color: #1a1a1a;
+    line-height: 1.5;
+    color: {INK};
 }}
-
-/* ── Header block ── */
-.cl-header {{ margin-bottom: 32px; }}
-.cl-name {{
-    font-size: 18pt;
-    font-weight: 700;
-    letter-spacing: -0.3px;
-    margin-bottom: 3px;
+{HEADER_CSS}
+.cl-header {{
+    border-bottom: 0.75pt solid {INK};
+    padding-bottom: 10px;
+    margin-bottom: 26px;
 }}
-.cl-contact {{ font-size: 9pt; color: #777; }}
-
-/* ── Addressee line (company + role) ── */
-.cl-addressee {{
-    font-size: 10.5pt;
-    font-weight: 600;
-    margin-bottom: 18px;
-}}
-
-/* ── Body ── */
-p {{ margin-bottom: 14px; }}
-.signature {{ margin-top: 26px; }}
+p {{ margin-bottom: 12px; }}
+.signature {{ margin-top: 20px; }}
 """
+
+
+def _esc(s: str) -> str:
+    return htmlmod.escape(s, quote=False)
+
+
+def _inline(s: str) -> str:
+    """Escape, then apply **bold** and _italic_."""
+    s = _esc(s)
+    s = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", s)
+    s = re.sub(r"(?<![\w])_(.+?)_(?![\w])", r"<em>\1</em>", s)
+    return s
+
+
+def _fmt_date(d: str) -> str:
+    """'Aug 2026 - Present' / 'Aug 2026–Present' → 'Aug 2026 – Present'."""
+    return re.sub(r"\s*[-–—]\s*", " – ", d.strip())
+
+
+def _contact_html(line: str) -> str:
+    """Contact items split on · or |; emails and web addresses become underlined links."""
+    items = [i.strip() for i in re.split(r"\s*[·|]\s*", line) if i.strip()]
+    out = []
+    for it in items:
+        e = _esc(it)
+        if "@" in it and " " not in it:
+            out.append(f'<a href="mailto:{e}">{e}</a>')
+        elif re.match(r"^(https?://)?[\w-]+(\.[\w-]+)+(/\S*)?$", it):
+            href = it if it.startswith("http") else f"https://{it}"
+            out.append(f'<a href="{_esc(href)}">{e}</a>')
+        else:
+            out.append(e)
+    return '<span class="sep">·</span>'.join(out)
+
+
+def parse_header(md: str) -> tuple[str, str, str]:
+    """Name, title and contact line from the top of a CV markdown."""
+    lines = []
+    for raw in md.split("\n"):
+        s = raw.strip()
+        if s.startswith("## "):
+            break
+        if not s or s == "---":
+            continue
+        lines.append(s.lstrip("# ").strip())
+    lines += ["", "", ""]
+    return lines[0], lines[1], lines[2]
+
+
+def _header_html(name: str, title: str, contact: str) -> str:
+    parts = [f'<div class="cv-name">{_esc(name)}</div>']
+    if title:
+        parts.append(f'<div class="cv-subtitle">{_esc(title)}</div>')
+    if contact:
+        parts.append(f'<div class="cv-contact">{_contact_html(contact)}</div>')
+    return "\n".join(parts)
 
 
 # ─────────────────────────────────────────────
 # CV markdown → HTML
 # ─────────────────────────────────────────────
 
-def _markdown_cv_to_html(md: str) -> str:
-    """
-    Converts the CV markdown to HTML.
+def _entry_header(title: str, date: str) -> str:
+    return (f'<div class="role-header"><span class="role-title">{_inline(title)}</span>'
+            f'<span class="role-date">{_esc(_fmt_date(date))}</span></div>')
 
-    The first 3 content lines are always: name / subtitle / contact.
-    Claude doesn't add # prefixes to these — we detect them by position
-    (before the first ## section header).
-    """
-    lines = md.split("\n")
-    html: list[str] = []
+
+def _markdown_cv_to_html(md: str) -> str:
+    html: list[str] = [_header_html(*parse_header(md))]
     in_ul = False
-    header_lines_seen = 0   # counts name/subtitle/contact lines at top
-    in_header = True        # True until we hit the first ## section
+    in_header = True
 
     def close_ul():
         nonlocal in_ul
@@ -148,75 +212,44 @@ def _markdown_cv_to_html(md: str) -> str:
             html.append("</ul>")
             in_ul = False
 
-    for line in lines:
+    for line in md.split("\n"):
         s = line.strip()
 
-        # Skip our own flavour comment lines
-        if s.startswith("# CV Flavour") or s.startswith("# Use for:"):
-            continue
-
-        if not s:
-            close_ul()
-            continue
-
-        # ── Section header → end of CV header block ──
         if s.startswith("## "):
             in_header = False
             close_ul()
-            html.append(f'<h2>{s[3:]}</h2>')
+            html.append(f"<h2>{_esc(s[3:])}</h2>")
+            continue
+        if in_header or not s or s == "---":
+            if not s:
+                close_ul()
             continue
 
-        # ── Explicit h1 (in case Claude uses it) ──
-        if s.startswith("# "):
-            in_header = False
+        # ── Entry header: ### Title | Date  (or legacy **Title** | Date) ──
+        if s.startswith("### ") or (s.startswith("**") and " | " in s and ":**" not in s):
             close_ul()
-            html.append(f'<span class="cv-name">{s[2:]}</span>')
+            inner = re.sub(r"^###\s+", "", s)
+            inner = re.sub(r"\*+", "", inner).strip()
+            title, date = inner.rsplit(" | ", 1) if " | " in inner else (inner, "")
+            html.append(_entry_header(title.strip(), date))
             continue
 
-        # ── CV header block: first 3 lines = name / subtitle / contact ──
-        if in_header:
-            header_lines_seen += 1
-            if header_lines_seen == 1:
-                html.append(f'<div class="cv-name">{s}</div>')
-            elif header_lines_seen == 2:
-                html.append(f'<div class="cv-subtitle">{s}</div>')
-            else:
-                html.append(f'<div class="cv-contact">{s}</div>')
-            continue
-
-        # ── Role header: **Title · Company** | 2025–Present ──
-        if s.startswith("**") and " | " in s:
+        # ── Italic one-line description under an entry ──
+        if (s.startswith("_") and s.endswith("_")) or (s.startswith("*") and s.endswith("*")
+                                                       and not s.startswith("**")):
             close_ul()
-            inner = re.sub(r"\*+", "", s).strip()
-            title_part, date_part = inner.rsplit(" | ", 1) if " | " in inner else (inner, "")
-            html.append(
-                f'<div class="role-header">'
-                f'<span class="role-title">{title_part.strip()}</span>'
-                f'<span class="role-date">{date_part.strip()}</span>'
-                f'</div>'
-            )
+            html.append(f'<div class="role-desc">{_esc(s.strip("_*").strip())}</div>')
             continue
 
-        # ── Bullet ──
-        if s.startswith("- "):
+        if s.startswith(("- ", "• ", "* ")):
             if not in_ul:
                 html.append("<ul>")
                 in_ul = True
-            content = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", s[2:])
-            html.append(f"<li>{content}</li>")
+            html.append(f"<li>{_inline(s[2:].strip())}</li>")
             continue
 
-        # ── Skills lines: **Label:** value ──
-        if s.startswith("**") and ":**" in s:
-            close_ul()
-            content = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", s)
-            html.append(f"<p>{content}</p>")
-            continue
-
-        # ── Everything else ──
         close_ul()
-        content = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", s)
-        html.append(f"<p>{content}</p>")
+        html.append(f"<p>{_inline(s)}</p>")
 
     close_ul()
     return "\n".join(html)
@@ -226,60 +259,22 @@ def _markdown_cv_to_html(md: str) -> str:
 # Cover letter text → HTML
 # ─────────────────────────────────────────────
 
-def _cover_letter_to_html(text: str) -> str:
-    """
-    Converts cover letter plain text to styled HTML.
-    Detects the addressee line (Company — Role) and styles it separately.
-    """
-    lines = text.strip().split("\n")
-
-    # Collect paragraphs
-    paragraphs: list[str] = []
-    current: list[str] = []
-    for line in lines:
-        if line.strip() == "":
-            if current:
-                paragraphs.append(" ".join(current))
-                current = []
-        else:
-            current.append(line.strip())
-    if current:
-        paragraphs.append(" ".join(current))
-
-    # Strip off any "Liam Hasson / Berlin..." header lines Claude might include
-    # (we render our own header)
-    while paragraphs and (
-        paragraphs[0].startswith("Liam Hasson") or
-        paragraphs[0].startswith("Berlin") or
-        paragraphs[0].startswith("+49")
-    ):
-        paragraphs.pop(0)
-
-    parts = [
-        '<div class="cl-header">',
-        '<div class="cl-name">Liam Hasson</div>',
-        '<div class="cl-contact">Berlin, Germany · Liamhasson@gmail.com · liamhasson.figma.site</div>',
-        '</div>',
-    ]
-
-    for para in paragraphs:
-        if para.startswith("Best,") or para.startswith("Best Liam") or para == "Liam Hasson":
-            parts.append(f'<p class="signature">{para}</p>')
-        else:
-            parts.append(f"<p>{para}</p>")
-
+def _cover_letter_to_html(text: str, header: tuple[str, str, str]) -> str:
+    paras = [p.strip() for p in re.split(r"\n\s*\n", text.strip()) if p.strip()]
+    parts = ['<div class="cl-header">', _header_html(*header), "</div>"]
+    for i, para in enumerate(paras):
+        body = "<br>".join(_inline(l.strip()) for l in para.split("\n"))
+        is_sign = i == len(paras) - 1 and len(para) < 40
+        parts.append(f'<p class="signature">{body}</p>' if is_sign else f"<p>{body}</p>")
     return "\n".join(parts)
 
-
-# ─────────────────────────────────────────────
-# Render engine
-# ─────────────────────────────────────────────
 
 def _build_html(body_html: str, css: str) -> str:
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+{FONT_LINK}
 <style>{css}</style>
 </head>
 <body>{body_html}</body>
@@ -289,24 +284,26 @@ def _build_html(body_html: str, css: str) -> str:
 async def _render_pdf_async(html: str, output_path: Path, margins: dict) -> Path:
     """
     Renders HTML to a single A4 page PDF.
-    Measures actual content height, auto-scales down if it overflows one page.
+    Measures actual content height at the printed width, scales down if it overflows.
     """
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    top_mm  = float(margins["top"].replace("mm", ""))
-    bot_mm  = float(margins["bottom"].replace("mm", ""))
-    a4_usable_px = (297 - top_mm - bot_mm) * 96 / 25.4
+    def mm(v: str) -> float:
+        return float(v.replace("mm", ""))
+
+    usable_w_px = (210 - mm(margins["left"]) - mm(margins["right"])) * 96 / 25.4
+    usable_h_px = (297 - mm(margins["top"]) - mm(margins["bottom"])) * 96 / 25.4
 
     async with pw.async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
-        page = await browser.new_page(viewport={"width": 760, "height": 5000})
+        page = await browser.new_page(viewport={"width": round(usable_w_px), "height": 5000})
         await page.set_content(html, wait_until="networkidle")
+        await page.evaluate("document.fonts.ready")
 
         scroll_height = await page.evaluate("document.body.scrollHeight")
-
-        if scroll_height > a4_usable_px:
-            scale = max(0.6, round(a4_usable_px / scroll_height, 3))
-            print(f"  [pdf] Scaling to {scale:.0%} ({scroll_height:.0f}px → {a4_usable_px:.0f}px)")
+        if scroll_height > usable_h_px:
+            scale = max(0.75, round(usable_h_px / scroll_height - 0.005, 3))
+            print(f"  [pdf] Scaling to {scale:.0%} ({scroll_height:.0f}px → {usable_h_px:.0f}px)")
         else:
             scale = 1.0
 
@@ -321,37 +318,18 @@ async def _render_pdf_async(html: str, output_path: Path, margins: dict) -> Path
     return output_path
 
 
+CV_MARGINS = {"top": "12.7mm", "right": "12.7mm", "bottom": "12.7mm", "left": "12.7mm"}
+CL_MARGINS = {"top": "16mm", "right": "20mm", "bottom": "16mm", "left": "20mm"}
+
+
 def generate_cv_pdf(cv_markdown: str, output_path: Path) -> Path:
-    body = _markdown_cv_to_html(cv_markdown)
-    html = _build_html(body, CV_CSS)
-    margins = {"top": "14mm", "right": "16mm", "bottom": "14mm", "left": "16mm"}
-    return asyncio.run(_render_pdf_async(html, output_path, margins))
+    html = _build_html(_markdown_cv_to_html(cv_markdown), CV_CSS)
+    return asyncio.run(_render_pdf_async(html, output_path, CV_MARGINS))
 
 
-def generate_cover_letter_pdf(cover_letter_text: str, output_path: Path) -> Path:
-    body = _cover_letter_to_html(cover_letter_text)
-    html = _build_html(body, COVER_LETTER_CSS)
-    margins = {"top": "20mm", "right": "20mm", "bottom": "20mm", "left": "20mm"}
-    return asyncio.run(_render_pdf_async(html, output_path, margins))
-
-
-if __name__ == "__main__":
-    base_dir = Path(__file__).parent.parent.parent / "base_documents"
-    cv_md = (base_dir / "cv_flavour_a.md").read_text()
-    out = generate_cv_pdf(cv_md, OUTPUT_DIR / "test" / "cv_test.pdf")
-    print(f"CV PDF → {out}")
-
-    sample = """Hi,
-
-Some companies talk about moving fast. This one actually does.
-
-On Pulse, I rebuilt the onboarding flow after 80% of test participants said the original felt too generic. Redesigned around personalised goal-setting, three rounds of iteration. A/B testing showed 70% preferred unlimited challenges, so I removed the cap entirely.
-
-I shipped Show Date Checker as sole designer and developer — Next.js, Ticketmaster API, Vercel, live in three weeks. Not because I had to, but because I wanted to close the loop between design and reality.
-
-Happy to show you the work.
-
-Best, Liam Hasson"""
-
-    out2 = generate_cover_letter_pdf(sample, OUTPUT_DIR / "test" / "cl_test.pdf")
-    print(f"Cover letter PDF → {out2}")
+def generate_cover_letter_pdf(cover_letter_text: str, output_path: Path,
+                              cv_markdown: str = "") -> Path:
+    """Cover letter with the same header as the CV (taken from `cv_markdown`)."""
+    header = parse_header(cv_markdown) if cv_markdown.strip() else ("Liam Hasson", "", "")
+    html = _build_html(_cover_letter_to_html(cover_letter_text, header), COVER_LETTER_CSS)
+    return asyncio.run(_render_pdf_async(html, output_path, CL_MARGINS))

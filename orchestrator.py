@@ -128,7 +128,7 @@ def process_job(
 
     print(f"  → Generating PDFs...")
     cv_pdf = generate_cv_pdf(cv_md, job_dir / "cv.pdf")
-    cl_pdf = generate_cover_letter_pdf(cl_text, job_dir / "cover_letter.pdf")
+    cl_pdf = generate_cover_letter_pdf(cl_text, job_dir / "cover_letter.pdf", cv_markdown=cv_md)
 
     pkg = ApplicationPackage(
         job=job,

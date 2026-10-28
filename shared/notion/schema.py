@@ -116,6 +116,16 @@ COMPANIES_SCHEMA: dict = {
     "Active": {"checkbox": {}},
 }
 
+# Lines Liam rejected, so the Writer never writes them again. Lives under Private
+# (not the root page), and an entry is only added after Liam confirms it.
+NEVER_AGAIN_SCHEMA: dict = {
+    "Line": {"title": {}},
+    "Reason": {"rich_text": {}},
+    "Applies to": _select("shared", "cover letter", "CV"),
+    "Date": {"date": {}},
+    "Application": {"rich_text": {}},
+}
+
 # Order matters only for how they appear in the page.
 DATABASES: dict[str, dict] = {
     "Jobs": JOBS_SCHEMA,

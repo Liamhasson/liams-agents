@@ -49,6 +49,8 @@ def _pick_job(notion: NotionClient, jobs_db: str, job_id: str | None) -> dict | 
 def _finalize(claude, notion, tg, chat, ctx, job_page_id, history) -> None:
     tg.send_message(chat, "Got it — writing the final drafts and making your PDFs… ✍️")
     drafts = converse.finalize(claude, ctx, history)
+    for fix in drafts.get("review_log", []):
+        print(f"  [review] {fix}")
     notion.update_page(job_page_id, {
         "CV draft": _rt(drafts["cv_markdown"]),
         "Cover letter draft": _rt(drafts["cover_letter_markdown"]),
@@ -59,7 +61,8 @@ def _finalize(claude, notion, tg, chat, ctx, job_page_id, history) -> None:
     cv_pdf = generate_cv_pdf(drafts["cv_markdown"], OUTPUT_DIR / f"{slug}_cv.pdf")
     tg.send_document(chat, str(cv_pdf), caption=f"📄 CV — {ctx.company}")
     if drafts["cover_letter_markdown"].strip():
-        cl_pdf = generate_cover_letter_pdf(drafts["cover_letter_markdown"], OUTPUT_DIR / f"{slug}_cover.pdf")
+        cl_pdf = generate_cover_letter_pdf(drafts["cover_letter_markdown"], OUTPUT_DIR / f"{slug}_cover.pdf",
+                                           cv_markdown=drafts["cv_markdown"])
         tg.send_document(chat, str(cl_pdf), caption=f"✉️ Cover letter — {ctx.company}")
     tg.send_message(chat, "Here's your pack — have a final look. Reply <b>approve</b> when happy, "
                           "or tell me what to change. (Submitting comes in the next phase.)")

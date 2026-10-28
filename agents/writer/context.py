@@ -6,11 +6,22 @@ job's research notes — never invented.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from shared.notion import NotionClient
 from shared.notion.client import plain_title, plain_text, plain_select, plain_url
 from shared import config
+
+
+@dataclass(frozen=True)
+class NeverAgain:
+    """A line Liam rejected. `applies_to` is "shared", "cover letter" or "CV"."""
+    line: str
+    reason: str
+    applies_to: str = "shared"
+
+    def applies(self, kind: str | None) -> bool:
+        return kind is None or self.applies_to in ("shared", kind)
 
 
 @dataclass
@@ -26,6 +37,7 @@ class WriterContext:
     url: str
     mytone: str
     base_cv: str
+    never_again: list[NeverAgain] = field(default_factory=list)
 
 
 def _private_page_id(notion: NotionClient) -> str | None:
@@ -45,24 +57,29 @@ def _file_block_url_name(block: dict) -> tuple[str, str]:
 
 
 def load_base_cv(notion: NotionClient) -> str:
-    """Load Liam's CV(s) from Private — whether kept as sub-pages or uploaded .md files."""
+    """Load Liam's CV from Private — whether kept as sub-pages or uploaded .md files.
+
+    If a CV is named "current", only that one is used: older versions carry stale
+    titles and dates that would conflict with it.
+    """
     import httpx
     private = _private_page_id(notion)
     if not private:
         return ""
-    parts = []
+    parts: list[tuple[str, str]] = []
     for b in notion._paginated("GET", f"/blocks/{private}/children?page_size=100"):
         t = b.get("type")
         if t == "child_page" and "cv" in b["child_page"].get("title", "").lower():
-            parts.append(notion.page_text(b["id"]))
+            parts.append((b["child_page"]["title"], notion.page_text(b["id"])))
         elif t == "file":
             url, name = _file_block_url_name(b)
             if url and (name.lower().endswith((".md", ".txt")) or "cv" in name.lower()):
                 try:
-                    parts.append(httpx.get(url, timeout=20, follow_redirects=True).text)
+                    parts.append((name, httpx.get(url, timeout=20, follow_redirects=True).text))
                 except Exception:
                     pass
-    return "\n\n---\n\n".join(p for p in parts if p.strip())
+    current = [p for p in parts if "current" in p[0].lower()]
+    return "\n\n---\n\n".join(text for _, text in (current or parts) if text.strip())
 
 
 def load_mytone(notion: NotionClient) -> str:
@@ -70,6 +87,17 @@ def load_mytone(notion: NotionClient) -> str:
     if not pid:
         raise RuntimeError("mytone not set up. Run: python scripts/write_mytone.py")
     return notion.page_text(pid)
+
+
+def load_never_again(notion: NotionClient) -> list[NeverAgain]:
+    """Lines Liam rejected, from the "Never again" database under Private."""
+    db = notion.load_ids().get("Never again")
+    if not db:
+        raise RuntimeError("Never again list not set up. Run: python scripts/setup_never_again.py")
+    entries = [NeverAgain(plain_title(p), plain_text(p, "Reason"),
+                          plain_select(p, "Applies to") or "shared")
+               for p in notion.query_database(db)]
+    return [e for e in entries if e.line.strip()]
 
 
 def build_context(notion: NotionClient, job_page: dict) -> WriterContext:
@@ -85,4 +113,5 @@ def build_context(notion: NotionClient, job_page: dict) -> WriterContext:
         url=plain_url(job_page, "URL") or plain_url(job_page, "Apply URL"),
         mytone=load_mytone(notion),
         base_cv=load_base_cv(notion),
+        never_again=load_never_again(notion),
     )
