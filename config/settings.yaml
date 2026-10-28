@@ -97,3 +97,12 @@ matcher:
     - working student
     - werkstudent
 
+# --- Messenger (Phase 4) ----------------------------------------------------
+messenger:
+  # A posting not seen by the Hunter for this many days is treated as gone.
+  expiry_days: 3
+  # Statuses that still need Liam's decision (reminded daily, can expire).
+  awaiting_statuses:
+    - Waiting for Liam
+    - Asked Liam
+

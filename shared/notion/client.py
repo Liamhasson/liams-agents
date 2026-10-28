@@ -281,5 +281,9 @@ def plain_date(page: dict, prop: str) -> str:
     return d.get("start", "") if d else ""
 
 
+def plain_url(page: dict, prop: str) -> str:
+    return page.get("properties", {}).get(prop, {}).get("url") or ""
+
+
 def plain_checkbox(page: dict, prop: str) -> bool:
     return bool(page.get("properties", {}).get(prop, {}).get("checkbox"))

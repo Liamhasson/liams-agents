@@ -66,6 +66,7 @@ JOBS_SCHEMA: dict = {
     "Apply method": _select("email", "ATS form", "manual"),
     "Last reminder at": {"date": {}},
     "Reminder count": {"number": {"format": "number"}},
+    "Telegram message id": {"number": {"format": "number"}},
     "Research notes": {"rich_text": {}},
     "CV draft": {"rich_text": {}},
     "Cover letter draft": {"rich_text": {}},

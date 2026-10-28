@@ -19,6 +19,8 @@ load_dotenv(dotenv_path=_ENV_PATH, override=False)
 NOTION_TOKEN = os.environ.get("NOTION_TOKEN")
 NOTION_ROOT_PAGE_ID = os.environ.get("NOTION_ROOT_PAGE_ID")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
 
 def require(name: str) -> str:
