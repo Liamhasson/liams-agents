@@ -63,6 +63,12 @@ def run() -> dict:
     allowed = str(config.require("TELEGRAM_CHAT_ID"))
     chat = config.require("TELEGRAM_CHAT_ID")
 
+    # A live Writer session owns the Telegram update stream — don't steal its
+    # messages (Telegram allows only one getUpdates consumer at a time).
+    if notion.query_database(jobs_db, {"property": "Status", "select": {"equals": "Drafting"}}):
+        print("A writing session is active — skipping poll.")
+        return {"handled": 0, "skipped": True}
+
     updates = tg.get_updates()
     if not updates:
         print("No new updates.")
