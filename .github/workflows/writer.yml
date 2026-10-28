@@ -1,0 +1,33 @@
+name: Writer — live co-writing session
+
+# Triggered by the poller when Liam taps Apply, or run manually.
+on:
+  workflow_dispatch:
+
+# One writing session at a time.
+concurrency:
+  group: writer-session
+  cancel-in-progress: false
+
+jobs:
+  write:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+      NOTION_ROOT_PAGE_ID: ${{ secrets.NOTION_ROOT_PAGE_ID }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: python -m playwright install chromium --with-deps
+      - name: Research (ensure notes exist)
+        run: python -m agents.researcher.run
+      - name: Co-writing session
+        run: python -m agents.writer.session --minutes 28

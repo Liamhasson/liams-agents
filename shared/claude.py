@@ -46,6 +46,15 @@ class Claude:
                 return block.input
         raise RuntimeError("Claude returned no structured output")
 
+    def chat(self, system: str, messages: list[dict], max_tokens: int = 800) -> str:
+        """Free-text turn (for the Writer's conversation)."""
+        resp = self.client.messages.create(
+            model=self.model, max_tokens=max_tokens, system=system, messages=messages,
+        )
+        self.input_tokens += resp.usage.input_tokens
+        self.output_tokens += resp.usage.output_tokens
+        return "".join(b.text for b in resp.content if b.type == "text").strip()
+
     def cost_summary(self) -> str:
         return (f"tokens: {self.input_tokens} in / {self.output_tokens} out "
                 f"({self.model})")

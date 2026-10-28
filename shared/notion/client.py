@@ -88,14 +88,23 @@ class NotionClient:
         raise RuntimeError(f"Notion {method} {path} kept returning 429 after retries")
 
     def _paginated(self, method: str, path: str, payload: Optional[dict] = None) -> list[dict]:
+        # Notion wants pagination as a query param on GET, but in the body on POST.
         results: list[dict] = []
-        body = dict(payload or {})
+        cursor: Optional[str] = None
         while True:
-            data = self._request(method, path, body)
+            if method.upper() == "GET":
+                sep = "&" if "?" in path else "?"
+                url = path + (f"{sep}start_cursor={cursor}" if cursor else "")
+                data = self._request("GET", url, None)
+            else:
+                body = dict(payload or {})
+                if cursor:
+                    body["start_cursor"] = cursor
+                data = self._request("POST", path, body)
             results.extend(data.get("results", []))
             if not data.get("has_more"):
                 return results
-            body["start_cursor"] = data["next_cursor"]
+            cursor = data["next_cursor"]
 
     # ---- databases ------------------------------------------------------
     def find_databases_under(self, page_id: str) -> dict[str, str]:
@@ -167,6 +176,19 @@ class NotionClient:
 
     def get_page(self, page_id: str) -> dict:
         return self._request("GET", f"/pages/{page_id}")
+
+    def page_text(self, page_id: str) -> str:
+        """Concatenate the visible text of a page's blocks (for loading docs)."""
+        blocks = self._paginated("GET", f"/blocks/{page_id}/children?page_size=100")
+        lines: list[str] = []
+        for b in blocks:
+            btype = b.get("type", "")
+            body = b.get(btype, {})
+            rt = body.get("rich_text", []) if isinstance(body, dict) else []
+            text = "".join(x.get("plain_text", "") for x in rt)
+            if text.strip():
+                lines.append(text)
+        return "\n".join(lines)
 
     def update_page(self, page_id: str, properties: dict) -> dict:
         return self._request("PATCH", f"/pages/{page_id}", {"properties": properties})

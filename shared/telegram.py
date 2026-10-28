@@ -51,6 +51,23 @@ class Telegram:
     def answer_callback(self, callback_query_id: str, text: str = "") -> dict:
         return self._post("answerCallbackQuery", {"callback_query_id": callback_query_id, "text": text})
 
+    def send_document(self, chat_id, file_path: str, caption: str = "") -> dict:
+        import os
+        with open(file_path, "rb") as fh:
+            data = {"chat_id": str(chat_id)}
+            if caption:
+                data["caption"] = caption
+                data["parse_mode"] = "HTML"
+            r = self._http.post(
+                f"{self.base}/sendDocument",
+                data=data,
+                files={"document": (os.path.basename(file_path), fh, "application/pdf")},
+            )
+        result = r.json()
+        if not result.get("ok"):
+            raise RuntimeError(f"Telegram sendDocument failed: {result}")
+        return result["result"]
+
     def get_updates(self, offset: Optional[int] = None, timeout: int = 0) -> list[dict]:
         payload: dict = {"timeout": timeout, "allowed_updates": ["message", "callback_query"]}
         if offset is not None:

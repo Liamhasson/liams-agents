@@ -22,6 +22,23 @@ APPLY_WORDS = {"apply", "yes", "y", "go", "✅", "👍"}
 SKIP_WORDS = {"skip", "no", "n", "⏭", "👎"}
 
 
+def _trigger_writer() -> None:
+    """Kick off the Writer session workflow (only when running in GitHub Actions)."""
+    import os
+    import httpx
+    tok, repo = os.environ.get("GITHUB_TOKEN"), os.environ.get("GITHUB_REPOSITORY")
+    if not tok or not repo:
+        return  # local run — no-op
+    try:
+        httpx.post(
+            f"https://api.github.com/repos/{repo}/actions/workflows/writer.yml/dispatches",
+            headers={"Authorization": f"Bearer {tok}", "Accept": "application/vnd.github+json"},
+            json={"ref": "main"}, timeout=20,
+        )
+    except Exception:
+        pass
+
+
 def _safe_answer(tg, qid: str, text: str = "") -> None:
     """Ack a tap — best-effort. With ~5-min polling the query often expires;
     that's harmless (the button spinner clears on its own and we send a
@@ -93,7 +110,8 @@ def _handle_callback(tg, notion, chat, allowed, cq) -> int:
         changed = _apply_decision(notion, page_id, status, "apply")
         _safe_answer(tg, qid, "✅ Approved" if changed else "Already handled")
         if changed:
-            tg.send_message(chat, f"✅ Approved: <b>{title}</b>\n(Company research + drafting arrive in the next phase.)")
+            tg.send_message(chat, f"✅ Approved: <b>{title}</b>\nResearching the company and starting the write-up…")
+            _trigger_writer()
         return 1 if changed else 0
     if action in ("skip", "no"):
         changed = _apply_decision(notion, page_id, status, "skip")

@@ -14,11 +14,14 @@ jobs:
   poll:
     runs-on: ubuntu-24.04
     timeout-minutes: 8
+    permissions:
+      actions: write        # to trigger the Writer session on Apply
     env:
       NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
       NOTION_ROOT_PAGE_ID: ${{ secrets.NOTION_ROOT_PAGE_ID }}
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
