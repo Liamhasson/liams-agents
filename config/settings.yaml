@@ -89,7 +89,7 @@ hunter:
 
 # --- Matcher (Phase 3) ------------------------------------------------------
 matcher:
-  alert_threshold: 70        # >= this -> alert-worthy
+  alert_threshold: 60        # >= this -> alert-worthy (tuned down with Liam from 70)
   ask_threshold: 40          # this..alert-1 -> borderline, ask Liam
   # Deterministic hard-drops before spending a Claude call (working-student
   # roles are excluded per Liam; internships/Praktikum are kept and scored).
