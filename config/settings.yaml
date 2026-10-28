@@ -51,3 +51,38 @@ notification:
 
 schedule:
   cron: "0 8 * * *"  # 8am daily
+
+# --- Hunter (Phase 2) -------------------------------------------------------
+# The Hunter collects + dedupes only. Real scoring happens in the Matcher.
+# This permissive title gate just keeps the Jobs DB from filling with roles
+# that are obviously not design (e.g. backend engineer). When in doubt it keeps
+# the job — the Matcher makes the real call.
+hunter:
+  min_interval_seconds: 1.0        # per-host politeness (~1 req/sec)
+  title_keywords:
+    - design
+    - designer
+    - ux
+    - ui
+    - product design
+    - brand
+    - visual
+    - graphic
+    - creative
+    - motion
+    - interaction
+    - research
+    - growth
+    - founder associate
+  # Titles containing any of these are dropped even if a keyword matched above.
+  title_exclude:
+    - engineer        # "design engineer" is re-included below
+    - engineering
+    - developer
+    - sales
+    - account
+    - marketing manager
+  title_exclude_exceptions:
+    - design engineer
+    - ux engineer
+    - frontend design

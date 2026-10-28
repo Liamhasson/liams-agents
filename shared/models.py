@@ -45,6 +45,7 @@ class Job:
     posted_at: str = ""         # ISO date
     first_seen_at: str = field(default_factory=_now_iso)
     role_type: str = ""
+    description: str = ""       # captured during hunt; persisted later (Matcher phase)
     score: Optional[int] = None
     fit_summary: str = ""
     why_liam: str = ""

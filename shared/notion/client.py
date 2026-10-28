@@ -9,7 +9,10 @@ limits (~3 requests/second).
 from __future__ import annotations
 
 import json
+import re
 import time
+from datetime import datetime
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Any, Optional
 
@@ -33,6 +36,26 @@ def _rt(s: str) -> dict:
 
 def _title(s: str) -> dict:
     return {"title": [{"type": "text", "text": {"content": (s or "")[:_MAX_TEXT]}}]}
+
+
+def _coerce_date(s: str) -> Optional[str]:
+    """Return an ISO-8601 date/datetime Notion will accept, or None.
+
+    Handles ISO strings (as-is) and RFC-822 feed dates ('Mon, 26 Oct 2026 ...').
+    """
+    if not s:
+        return None
+    s = s.strip()
+    if re.match(r"^\d{4}-\d{2}-\d{2}", s):
+        return s
+    try:
+        return parsedate_to_datetime(s).date().isoformat()
+    except Exception:
+        pass
+    try:
+        return datetime.fromisoformat(s).isoformat()
+    except Exception:
+        return None
 
 
 class NotionClient:
@@ -129,6 +152,9 @@ class NotionClient:
     def get_page(self, page_id: str) -> dict:
         return self._request("GET", f"/pages/{page_id}")
 
+    def update_page(self, page_id: str, properties: dict) -> dict:
+        return self._request("PATCH", f"/pages/{page_id}", {"properties": properties})
+
     def archive_page(self, page_id: str) -> dict:
         return self._request("PATCH", f"/pages/{page_id}", {"archived": True})
 
@@ -153,8 +179,9 @@ class NotionClient:
             props["Company ATS"] = {"select": {"name": job.ats}}
         if job.remote:
             props["Remote"] = {"select": {"name": job.remote}}
-        if job.posted_at:
-            props["Posted at"] = {"date": {"start": job.posted_at}}
+        _posted = _coerce_date(job.posted_at)
+        if _posted:
+            props["Posted at"] = {"date": {"start": _posted}}
         if job.role_type:
             props["Role type"] = {"select": {"name": job.role_type}}
         if job.score is not None:
@@ -207,3 +234,17 @@ def plain_text(page: dict, prop: str) -> str:
     if v.get("type") == "rich_text":
         return "".join(t.get("plain_text", "") for t in v.get("rich_text", []))
     return ""
+
+
+def plain_select(page: dict, prop: str) -> str:
+    v = page.get("properties", {}).get(prop, {})
+    sel = v.get("select")
+    return sel.get("name", "") if sel else ""
+
+
+def plain_number(page: dict, prop: str):
+    return page.get("properties", {}).get(prop, {}).get("number")
+
+
+def plain_checkbox(page: dict, prop: str) -> bool:
+    return bool(page.get("properties", {}).get(prop, {}).get("checkbox"))
