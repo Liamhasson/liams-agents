@@ -26,8 +26,9 @@ NOTION_VERSION = "2022-06-28"
 API = "https://api.notion.com/v1"
 _IDS_PATH = Path(__file__).resolve().parent.parent.parent / "config" / "notion_ids.json"
 
-# Notion rich_text accepts at most 2000 chars per text object.
-_MAX_TEXT = 2000
+# Notion rich_text accepts at most 2000 chars per text object. Some characters
+# (emoji / non-BMP) count as 2 on Notion's side, so we keep headroom.
+_MAX_TEXT = 1900
 
 
 def _rt(s: str) -> dict:
@@ -129,17 +130,32 @@ class NotionClient:
         for name, schema in DATABASES.items():
             if name in existing:
                 ids[name] = existing[name]
+                self._add_missing_properties(existing[name], schema)
             else:
                 ids[name] = self.create_database(root, name, schema)
+        merged = {**self.load_ids(), **ids}  # preserve non-database ids (e.g. the profile page)
         _IDS_PATH.parent.mkdir(parents=True, exist_ok=True)
-        _IDS_PATH.write_text(json.dumps(ids, indent=2) + "\n")
-        return ids
+        _IDS_PATH.write_text(json.dumps(merged, indent=2) + "\n")
+        return merged
+
+    def _add_missing_properties(self, db_id: str, schema: dict) -> None:
+        """Add any schema properties not yet on an existing database (migration)."""
+        current = self._request("GET", f"/databases/{db_id}").get("properties", {})
+        missing = {k: v for k, v in schema.items() if k not in current}
+        if missing:
+            self._request("PATCH", f"/databases/{db_id}", {"properties": missing})
 
     @staticmethod
     def load_ids() -> dict[str, str]:
         if _IDS_PATH.exists():
             return json.loads(_IDS_PATH.read_text())
         return {}
+
+    def save_id(self, key: str, value: str) -> None:
+        ids = self.load_ids()
+        ids[key] = value
+        _IDS_PATH.parent.mkdir(parents=True, exist_ok=True)
+        _IDS_PATH.write_text(json.dumps(ids, indent=2) + "\n")
 
     def query_database(self, db_id: str, filter: Optional[dict] = None) -> list[dict]:
         payload = {"filter": filter} if filter else {}
@@ -184,6 +200,8 @@ class NotionClient:
             props["Posted at"] = {"date": {"start": _posted}}
         if job.role_type:
             props["Role type"] = {"select": {"name": job.role_type}}
+        if job.description:
+            props["Description"] = _rt(job.description)
         if job.score is not None:
             props["Score"] = {"number": job.score}
         if job.fit_summary:
@@ -217,6 +235,9 @@ class NotionClient:
         """
         existing = self.find_job(jobs_db_id, job)
         if existing:
+            # Backfill a missing description without touching First seen / Status / Score.
+            if job.description and not plain_text(existing, "Description"):
+                self.update_page(existing["id"], {"Description": _rt(job.description)})
             return existing, False
         return self.create_page(jobs_db_id, self.job_to_properties(job)), True
 
