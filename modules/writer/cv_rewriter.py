@@ -25,10 +25,17 @@ BASE_DIR = Path(__file__).parent.parent.parent / "base_documents"
 
 
 def _load_base_documents() -> dict[str, str]:
-    return {
-        "cv_a": (BASE_DIR / "cv_flavour_a.md").read_text(),
-        "cv_b": (BASE_DIR / "cv_flavour_b.md").read_text(),
-    }
+    try:
+        return {
+            "cv_a": (BASE_DIR / "cv_flavour_a.md").read_text(),
+            "cv_b": (BASE_DIR / "cv_flavour_b.md").read_text(),
+        }
+    except FileNotFoundError as e:
+        raise RuntimeError(
+            "Base CVs are no longer stored in the repo — they live in the Notion "
+            "'Private' page and will be loaded from Notion in a later phase. "
+            "CV drafting is temporarily disabled."
+        ) from e
 
 
 SYSTEM_PROMPT = """You are a CV writer for Liam Hasson, a Product/UX Designer.

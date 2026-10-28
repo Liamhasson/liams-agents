@@ -1,4 +1,6 @@
 .env
+# Personal data — never commit. CVs, tone and voice materials live in Notion.
+base_documents/
 config/gmail_token.json
 config/gmail_credentials.json
 output/

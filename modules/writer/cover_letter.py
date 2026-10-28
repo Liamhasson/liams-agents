@@ -19,11 +19,18 @@ BASE_DIR = Path(__file__).parent.parent.parent / "base_documents"
 
 
 def _load_voice_materials() -> dict[str, str]:
-    return {
-        "rules": (BASE_DIR / "voice_rules.md").read_text(),
-        "example_a": (BASE_DIR / "cover_letter_gameduel.md").read_text(),
-        "example_b": (BASE_DIR / "cover_letter_avaloq.md").read_text(),
-    }
+    try:
+        return {
+            "rules": (BASE_DIR / "voice_rules.md").read_text(),
+            "example_a": (BASE_DIR / "cover_letter_gameduel.md").read_text(),
+            "example_b": (BASE_DIR / "cover_letter_avaloq.md").read_text(),
+        }
+    except FileNotFoundError as e:
+        raise RuntimeError(
+            "Cover-letter voice materials are no longer stored in the repo — "
+            "Liam's tone now lives in Notion (mytone.md) and will be loaded from "
+            "there in a later phase. Cover-letter drafting is temporarily disabled."
+        ) from e
 
 
 SYSTEM_PROMPT = """You are writing a cover letter for Liam Hasson, a Product/UX Designer based in Berlin.
