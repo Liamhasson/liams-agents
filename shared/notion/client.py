@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import re
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Any, Optional
@@ -183,6 +183,8 @@ class NotionClient:
             "Source": _rt(job.source),
             "Location": _rt(job.location),
             "First seen at": {"date": {"start": job.first_seen_at}},
+            "Last seen at": {"date": {"start": job.first_seen_at}},
+            "Times seen": {"number": 1},
             "Status": {"select": {"name": job.status or "New"}},
             "Dedupe key": _rt(job.dedupe_key),
             "Title+company hash": _rt(job.title_company_hash),
@@ -235,9 +237,16 @@ class NotionClient:
         """
         existing = self.find_job(jobs_db_id, job)
         if existing:
-            # Backfill a missing description without touching First seen / Status / Score.
+            # Track that we saw it again (repost/age signal) and backfill a
+            # missing description — without touching First seen / Status / Score.
+            seen = (plain_number(existing, "Times seen") or 1) + 1
+            update: dict = {
+                "Times seen": {"number": seen},
+                "Last seen at": {"date": {"start": datetime.now(timezone.utc).isoformat()}},
+            }
             if job.description and not plain_text(existing, "Description"):
-                self.update_page(existing["id"], {"Description": _rt(job.description)})
+                update["Description"] = _rt(job.description)
+            self.update_page(existing["id"], update)
             return existing, False
         return self.create_page(jobs_db_id, self.job_to_properties(job)), True
 
@@ -265,6 +274,11 @@ def plain_select(page: dict, prop: str) -> str:
 
 def plain_number(page: dict, prop: str):
     return page.get("properties", {}).get(prop, {}).get("number")
+
+
+def plain_date(page: dict, prop: str) -> str:
+    d = page.get("properties", {}).get(prop, {}).get("date")
+    return d.get("start", "") if d else ""
 
 
 def plain_checkbox(page: dict, prop: str) -> bool:

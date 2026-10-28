@@ -34,7 +34,7 @@ JOB_STATUSES = [
     "Rejected", "Skipped", "Expired",
 ]
 
-JOB_FLAGS = ["senior", "experience gap", "borderline", "contract", "unpaid"]
+JOB_FLAGS = ["senior", "experience gap", "borderline", "contract", "unpaid", "ghost"]
 
 
 JOBS_SCHEMA: dict = {
@@ -52,6 +52,11 @@ JOBS_SCHEMA: dict = {
     "Description": {"rich_text": {}},
     "German required": _select("none", "basic", "fluent"),
     "Remote eligibility": _select("berlin", "remote_de_ok", "unclear", "no"),
+    "Priority": _select("fresh", "recent", "older"),
+    "Ghost risk": _select("low", "medium", "high"),
+    "Ghost reason": {"rich_text": {}},
+    "Times seen": {"number": {"format": "number"}},
+    "Last seen at": {"date": {}},
     "Score": {"number": {"format": "number"}},
     "Fit summary": {"rich_text": {}},
     "Why Liam": {"rich_text": {}},

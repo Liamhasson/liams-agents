@@ -17,9 +17,12 @@ SCHEMA = {
         "flags": {"type": "array", "items": {"type": "string", "enum": JOB_FLAGS}},
         "german_required": {"type": "string", "enum": ["none", "basic", "fluent"]},
         "remote_eligibility": {"type": "string", "enum": ["berlin", "remote_de_ok", "unclear", "no"]},
+        "ghost_risk": {"type": "string", "enum": ["low", "medium", "high"],
+                       "description": "Likelihood this is an evergreen/ghost post, from the text."},
+        "ghost_reason": {"type": "string", "description": "One short phrase; '' if low."},
     },
-    "required": ["score", "role_type", "fit_summary", "why_you", "gaps",
-                 "flags", "german_required", "remote_eligibility"],
+    "required": ["score", "role_type", "fit_summary", "why_you", "gaps", "flags",
+                 "german_required", "remote_eligibility", "ghost_risk", "ghost_reason"],
 }
 
 SYSTEM = """You score design jobs for Liam Hasson against his profile below.
@@ -46,7 +49,87 @@ Rules:
   more product-design years than Liam has; 'contract'/'unpaid' where stated.
 - why_you and gaps must be grounded only in Liam's real experience. Never invent.
 - Working-student roles are not wanted; score them low.
+- ghost_risk: judge how likely this is an evergreen / "ghost" posting rather
+  than a real, specific opening. HIGH signals: "we're always looking", "talent
+  pool/community", "spontaneous/initiative application" ("Initiativbewerbung"),
+  a generic blurb with no concrete team, responsibilities or project. MEDIUM:
+  somewhat vague or boilerplate. LOW: a specific, concrete role. Put the tell in
+  ghost_reason. This does NOT lower the score — it is a separate warning.
 Return your answer by calling the submit_match tool."""
+
+
+_RISK_ORDER = {"low": 0, "medium": 1, "high": 2}
+
+
+def _to_dt(s: str):
+    from datetime import datetime, timezone
+    if not s:
+        return None
+    try:
+        dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+    except Exception:
+        try:
+            dt = datetime.strptime(s[:10], "%Y-%m-%d")
+        except Exception:
+            return None
+    return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt
+
+
+def _to_date(s: str):
+    dt = _to_dt(s)
+    return dt.date() if dt else None
+
+
+def freshness(posted_at: str, now_iso: str) -> str:
+    """Priority tier by how recently the role was posted: fresh/recent/older.
+
+    Uses the posting date (the signal that matters for 'apply first'). When the
+    post date is unknown we return 'recent' (neutral) rather than guess 'fresh'.
+    """
+    posted, now = _to_dt(posted_at), _to_dt(now_iso)
+    if not posted or not now:
+        return "recent"
+    hours = (now - posted).total_seconds() / 3600
+    if hours <= 24:
+        return "fresh"
+    if hours <= 24 * 7:
+        return "recent"
+    return "older"
+
+
+def assess_ghost(llm_risk: str, first_seen_at: str, posted_at: str, now_iso: str) -> tuple[str, list[str]]:
+    """Merge the content-based ghost risk with behavioural signals (age/repost).
+
+    Returns (risk, reasons). Behavioural signals strengthen over time as the
+    Hunter keeps seeing the same posting.
+    """
+    risk = llm_risk if llm_risk in _RISK_ORDER else "low"
+    reasons: list[str] = []
+
+    def bump(level: str):
+        nonlocal risk
+        if _RISK_ORDER[level] > _RISK_ORDER[risk]:
+            risk = level
+
+    first, posted, now = _to_date(first_seen_at), _to_date(posted_at), _to_date(now_iso)
+    # How long the role itself has been posted (noisy ATS dates -> high thresholds).
+    if posted and now:
+        pa = (now - posted).days
+        if pa >= 180:
+            bump("high"); reasons.append(f"posted ~{pa}d ago")
+        elif pa >= 90:
+            bump("medium"); reasons.append(f"posted ~{pa}d ago")
+    # How long WE have been seeing it (accrues as the Hunter runs over time).
+    if first and now:
+        age = (now - first).days
+        if age >= 180:
+            bump("high"); reasons.append(f"seen for ~{age}d")
+        elif age >= 90:
+            bump("medium"); reasons.append(f"seen for ~{age}d")
+    # Posting date refreshed well after we first saw it -> classic repost.
+    if first and posted and (posted - first).days >= 14:
+        bump("high"); reasons.append("posting date refreshed (likely reposted)")
+    return risk, reasons
 
 
 def is_hard_drop(title: str, description: str, keywords: list[str]) -> bool:

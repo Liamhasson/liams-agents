@@ -7,7 +7,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from agents.matcher.score import route, is_hard_drop
+from agents.matcher.score import route, is_hard_drop, assess_ghost, freshness
 
 ALERT, ASK = 70, 40
 
@@ -49,6 +49,41 @@ def test_hard_drop_working_student():
     assert is_hard_drop("Werkstudent Product Design (m/w/d)", "", kws)
     assert is_hard_drop("Product Designer", "This is a working student role", kws)
     assert not is_hard_drop("Product Designer", "Full-time permanent role", kws)
+
+
+def test_ghost_content_high_respected():
+    risk, _ = assess_ghost("high", "2026-10-20", "2026-10-20", "2026-10-28")
+    assert risk == "high"
+
+
+def test_ghost_fresh_specific_stays_low():
+    risk, reasons = assess_ghost("low", "2026-10-25", "2026-10-25", "2026-10-28")
+    assert risk == "low" and reasons == []
+
+
+def test_ghost_age_bumps_risk():
+    # first seen ~210 days ago, content said low -> age pushes to high
+    risk, reasons = assess_ghost("low", "2026-04-01", "2026-04-01", "2026-10-28")
+    assert risk == "high" and any(("seen for" in r or "posted" in r) for r in reasons)
+
+
+def test_ghost_moderate_age_is_medium_not_high():
+    # ~100 days -> medium under the softened thresholds, not high
+    risk, _ = assess_ghost("low", "2026-07-20", "2026-07-20", "2026-10-28")
+    assert risk == "medium"
+
+
+def test_freshness_tiers():
+    assert freshness("2026-10-28T08:00:00+00:00", "2026-10-28T20:00:00+00:00") == "fresh"   # 12h
+    assert freshness("2026-10-25", "2026-10-28") == "recent"                                # 3d
+    assert freshness("2026-09-01", "2026-10-28") == "older"                                 # ~8w
+    assert freshness("", "2026-10-28") == "recent"                                          # unknown
+
+
+def test_ghost_repost_detected():
+    # posting date is 20 days after we first saw it -> reposted
+    risk, reasons = assess_ghost("low", "2026-10-01", "2026-10-25", "2026-10-28")
+    assert risk == "high" and any("reposted" in r for r in reasons)
 
 
 if __name__ == "__main__":
