@@ -1,6 +1,8 @@
 .env
 # Personal data — never commit. CVs, tone and voice materials live in Notion.
 base_documents/
+# Retired in Phase 1 — dedupe now lives in the Notion Jobs database.
+seen_jobs.json
 config/gmail_token.json
 config/gmail_credentials.json
 output/

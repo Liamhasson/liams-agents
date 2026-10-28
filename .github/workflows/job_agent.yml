@@ -37,11 +37,3 @@ jobs:
           GMAIL_CREDENTIALS_JSON: ${{ secrets.GMAIL_CREDENTIALS_JSON }}
           GMAIL_TOKEN_JSON: ${{ secrets.GMAIL_TOKEN_JSON }}
         run: python orchestrator.py
-
-      - name: Commit updated seen_jobs.json
-        run: |
-          git config user.name "Job Agent Bot"
-          git config user.email "actions@github.com"
-          git add seen_jobs.json
-          git diff --cached --quiet || git commit -m "chore: update seen jobs [skip ci]"
-          git push
