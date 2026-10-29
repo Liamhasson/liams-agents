@@ -408,6 +408,38 @@ FINAL_SCHEMA = {
 }
 
 
+_REVISE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "cv_markdown": {"type": "string", "description": "The full CV after the change."},
+        "cover_letter_markdown": {"type": "string",
+                                  "description": "The full cover letter after the change, or '' if none."},
+        "note": {"type": "string", "description": "One short line to Liam on what you changed."},
+    },
+    "required": ["cv_markdown", "cover_letter_markdown", "note"],
+}
+
+
+def revise(claude: Claude, ctx: WriterContext, drafts: dict, request: str) -> dict:
+    """Apply Liam's change to the finished pack. Everything he didn't ask about stays word for word.
+
+    No review loop here: if Liam writes a line himself, his words win. The session
+    shows him the lint result instead of silently rewriting him.
+    """
+    user = ("Here is the finished pack. Liam asked for a change. Apply ONLY what he asked. "
+            "If he gives exact words, use them exactly. Keep every other line word for word. "
+            "If his change needs a fact that isn't in his sources, keep the old line and say "
+            "so in the note.\n\n"
+            f"=== CV ===\n{drafts['cv_markdown']}\n=== END CV ===\n\n"
+            f"=== COVER LETTER ===\n{drafts['cover_letter_markdown'] or '(none)'}\n"
+            f"=== END COVER LETTER ===\n\nLIAM'S CHANGE:\n{request}")
+    res = claude.json_call(build_system(ctx), user, _REVISE_SCHEMA,
+                           tool_name="submit_revision", max_tokens=6000, temperature=0)
+    if res["cover_letter_markdown"].strip() == "(none)":
+        res["cover_letter_markdown"] = ""
+    return res
+
+
 def finalize(claude: Claude, ctx: WriterContext, history: list[dict]) -> dict:
     convo = "\n".join(f"{m['role']}: {m['content']}" for m in history)
     user = ("Produce the FINAL documents now, based on our conversation below.\n"

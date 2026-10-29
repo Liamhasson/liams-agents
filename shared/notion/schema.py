@@ -70,6 +70,7 @@ JOBS_SCHEMA: dict = {
     "Research notes": {"rich_text": {}},
     "CV draft": {"rich_text": {}},
     "Cover letter draft": {"rich_text": {}},
+    "Lines changed": {"number": {"format": "number"}},  # Liam's edits to the first draft
     "Final PDFs": {"files": {}},
     "Applied at": {"date": {}},
     "Outcome": {"rich_text": {}},
