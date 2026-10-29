@@ -147,7 +147,8 @@ class Claude:
         self.output_tokens += usage.get("output_tokens", 0) or 0
         self.cost_usd += data.get("total_cost_usd", 0) or 0
         if data.get("is_error"):
-            raise RuntimeError(f"Claude Code error: {str(data.get('result'))[:300]}")
+            reason = data.get("result") or data.get("errors") or data.get("subtype")
+            raise RuntimeError(f"Claude Code error: {str(reason)[:300]}")
         return data
 
 

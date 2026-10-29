@@ -76,6 +76,14 @@ def test_job_card_shows_the_field():
     assert "other" not in job_card(_page())[0]
 
 
+def test_cards_show_the_score_breakdown():
+    page = _page()
+    page["properties"]["Score breakdown"] = {"type": "rich_text", "rich_text": [
+        {"plain_text": "fit 52 · Berlin +10 · new post +15"}]}
+    assert "<i>fit 52 · Berlin +10 · new post +15</i>" in job_card(page)[0]
+    assert "fit 52" in ask_card(page)[0]
+
+
 def test_uuid_roundtrip():
     assert _uuid("407be63a05ad8160bb8fed832bc3d9c2") == "407be63a-05ad-8160-bb8f-ed832bc3d9c2"
     assert _uuid("407be63a-05ad-8160-bb8f-ed832bc3d9c2") == "407be63a-05ad-8160-bb8f-ed832bc3d9c2"

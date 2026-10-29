@@ -35,13 +35,15 @@ def test_greenhouse():
     c = FakeClient(json_data={"jobs": [{
         "id": 1, "title": "Product Designer",
         "location": {"name": "Berlin"}, "absolute_url": "http://x",
-        "updated_at": "2026-01-01T00:00:00Z", "content": "<p>hello</p>",
+        "updated_at": "2026-10-26T00:00:00Z", "first_published": "2026-04-17T04:57:12-04:00",
+        "content": "<p>hello</p>",
     }]})
     jobs = greenhouse.fetch(c, "acme", "Acme")
     j = jobs[0]
     assert j.ats == "greenhouse" and j.job_id == "1" and j.company == "Acme"
     assert j.dedupe_key == "greenhouse:acme:1"
     assert j.remote == "" and "hello" in j.description
+    assert j.posted_at == "2026-04-17"  # first published, not last edited
 
 
 def test_lever_detects_remote():
@@ -114,9 +116,11 @@ def test_arbeitnow():
     c = FakeClient(json_data={"data": [{
         "title": "Designer", "company_name": "Acme", "url": "u",
         "location": "Berlin", "remote": True, "slug": "s1", "description": "<p>d</p>",
+        "created_at": 1793267716,
     }]})
     j = arbeitnow.fetch(c)[0]
     assert j.company == "Acme" and j.remote == "yes" and j.source == "Arbeitnow"
+    assert j.posted_at == "2026-10-29"
 
 
 def test_remotive_attribution():

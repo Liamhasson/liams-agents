@@ -23,7 +23,7 @@ from shared.notion import NotionClient
 from shared.notion.client import plain_title, plain_text, plain_select, plain_date
 from shared.notion.schema import ROLE_TYPES
 from .profile import load_profile
-from .score import (score, route, is_hard_drop, assess_ghost, freshness, with_bonus,
+from .score import (score, route, is_hard_drop, assess_ghost, freshness, adjust, age_points,
                     onsite_outside_berlin, written_in_german)
 
 _CONFIG = Path(__file__).resolve().parent.parent.parent / "config" / "settings.yaml"
@@ -43,8 +43,8 @@ def run(limit: int | None = None, rescore: bool = False, dry_run: bool = False,
     alert = int(cfg.get("alert_threshold", 70))
     ask = int(cfg.get("ask_threshold", 40))
     hard_drops = [k.lower() for k in cfg.get("hard_drop_title_keywords", [])]
-    berlin = int(cfg.get("berlin_bonus", 0))
-    fields = cfg.get("field_bonus", {}) or {}
+    age_table = cfg.get("age_points", {}) or {}
+    age_after = int(cfg.get("age_points_after", 0))
 
     notion = NotionClient()
     ids = notion.ensure_databases()
@@ -83,6 +83,7 @@ def run(limit: int | None = None, rescore: bool = False, dry_run: bool = False,
         posted = plain_date(page, "Posted at")
         priority = freshness(posted, now_iso)
         ghost_risk, ghost_reason = "low", ""
+        fit, breakdown = None, []
         # Deterministic hard drops — each saves a Claude call.
         if is_hard_drop(title, desc, hard_drops):
             reason = "working-student role"
@@ -117,9 +118,12 @@ def run(limit: int | None = None, rescore: bool = False, dry_run: bool = False,
                 now_iso,
             )
             ghost_reason = " · ".join(filter(None, [res.get("ghost_reason", "")] + greasons))
-            res["score"] = with_bonus(res, berlin, fields)  # ghost is a warning only — it never changes the score
+            # Ghost is a warning only — it never changes the score.
+            age = age_points(posted, now_iso, age_table, age_after)
+            fit = int(res["score"])
+            res["score"], breakdown = adjust(res, cfg, age)
             sc = int(res["score"])
-            decision, reason = route(res, alert, ask)
+            decision, reason = route(res, alert, ask, cfg)
 
         flags = list(res.get("flags", []))
         if decision == "ask" and "borderline" not in flags:
@@ -144,6 +148,9 @@ def run(limit: int | None = None, rescore: bool = False, dry_run: bool = False,
                 "German required": {"select": {"name": res["german_required"]}},
                 "Remote eligibility": {"select": {"name": res["remote_eligibility"]}},
                 "Field": {"select": {"name": res.get("field") or "other"}},
+                "Years required": {"number": int(res.get("years_required") or 0)},
+                "Fit score": {"number": fit},
+                "Score breakdown": _rt(" · ".join(breakdown)),
                 "Priority": {"select": {"name": priority}},
                 "Ghost risk": {"select": {"name": ghost_risk}},
                 "Ghost reason": _rt(ghost_reason),

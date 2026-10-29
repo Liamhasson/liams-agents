@@ -91,7 +91,12 @@ hunter:
 matcher:
   alert_threshold: 60        # >= this -> alert-worthy (tuned down with Liam from 70)
   ask_threshold: 40          # this..alert-1 -> borderline, ask Liam
-  berlin_bonus: 10           # extra points for Berlin office/hybrid roles (Liam's first choice)
+  # Bonuses (Berlin, role, field, a new post) only go to jobs that already fit:
+  # Claude's fit score must be at least bonus_min_fit. Penalties always apply.
+  bonus_min_fit: 40
+  berlin_bonus: 10           # Berlin office/hybrid roles (Liam's first choice)
+  role_bonus:                # the job Liam wants most
+    product design: 10
   # Extra points by the company's field. Fields not listed score as normal.
   # Music jobs are also sent first.
   field_bonus:
@@ -103,6 +108,27 @@ matcher:
     animals: 8
     innovative tech: 8
     cyber: 8
+  # Experience. The years a post asks for are compared with Liam's years in that
+  # discipline. Each "N years beyond his: points off"; more than
+  # experience_max_gap beyond is dropped and never shown.
+  liam_years:
+    product: 2
+    brand: 3
+    graphic/visual: 5
+  experience_penalty:
+    2: 10
+    3: 20
+  experience_max_gap: 3
+  # Points by how long ago the job was posted, given once when it's scored.
+  # Each row is "up to N days old: points". Unknown post date: no change.
+  age_points:
+    1: 20      # last 24 hours
+    3: 15      # last 72 hours
+    7: 10      # last 7 days
+    15: 0
+    30: -10    # older than 15 days
+    45: -15    # older than 30 days
+  age_points_after: -20   # older than 45 days
   # Deterministic hard-drops before spending a Claude call (working-student
   # roles are excluded per Liam; internships/Praktikum are kept and scored).
   hard_drop_title_keywords:

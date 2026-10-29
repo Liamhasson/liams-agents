@@ -39,7 +39,8 @@ def job_card(page: dict) -> tuple[str, list]:
     sub = f"{loc}" + (f" · {remote}" if remote else "") + f" · {score}/100 · via {source}"
     if field and field != "other":
         sub += " · " + " ".join(filter(None, [FIELD_EMOJI.get(field), field]))
-    lines = [head, sub, ""]
+    breakdown = _esc(plain_text(page, "Score breakdown"))
+    lines = [head, sub] + ([f"<i>{breakdown}</i>"] if breakdown else []) + [""]
     if ghost in ("medium", "high"):
         lines.append(f"⚠️ <i>possible ghost/evergreen post ({ghost})</i>")
     if fit:
@@ -65,7 +66,10 @@ def ask_card(page: dict) -> tuple[str, list]:
     title = _esc(plain_title(page))
     company = _esc(plain_text(page, "Company"))
     score = plain_number(page, "Score")
+    breakdown = _esc(plain_text(page, "Score breakdown"))
     text = f"🤔 Borderline ({score}/100): <b>{title}</b> at <b>{company}</b> — relevant to you?"
+    if breakdown:
+        text += f"\n<i>{breakdown}</i>"
     buttons = [[("👍 Yes", f"yes:{jid}"), ("👎 No", f"no:{jid}")]]
     return text, buttons
 

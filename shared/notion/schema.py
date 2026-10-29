@@ -54,6 +54,9 @@ JOBS_SCHEMA: dict = {
     "First seen at": {"date": {}},
     "Role type": _select(*ROLE_TYPES),
     "Field": _select(*FIELDS),
+    "Years required": {"number": {"format": "number"}},  # design experience the post asks for
+    "Fit score": {"number": {"format": "number"}},  # Claude's fit, before Liam's bonuses/penalties
+    "Score breakdown": {"rich_text": {}},
     "Description": {"rich_text": {}},
     "German required": _select("none", "basic", "fluent"),
     "Remote eligibility": _select("berlin", "remote_de_ok", "unclear", "no"),

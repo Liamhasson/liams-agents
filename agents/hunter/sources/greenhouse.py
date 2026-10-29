@@ -29,7 +29,8 @@ def fetch(client: PoliteClient, slug: str, company: str = "") -> list[Job]:
             job_id=str(j.get("id", "")),
             location=loc,
             remote=is_remote(loc, j.get("title", "")),
-            posted_at=(j.get("updated_at") or "")[:10],
+            # first_published, not updated_at: an edit shouldn't make an old post look new.
+            posted_at=(j.get("first_published") or j.get("updated_at") or "")[:10],
             description=content.strip()[:6000],
         ))
     return jobs

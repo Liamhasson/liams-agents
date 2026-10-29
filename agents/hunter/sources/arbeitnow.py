@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime, timezone
 
 from shared.http import PoliteClient
 from shared.models import Job
@@ -25,6 +26,8 @@ def fetch(client: PoliteClient, endpoint: str = "https://www.arbeitnow.com/api/j
             source=source_name,
             job_id=str(j.get("slug", ""))[:120],
             location=loc,
+            posted_at=(datetime.fromtimestamp(j["created_at"], timezone.utc).date().isoformat()
+                       if j.get("created_at") else ""),
             remote=remote,
             description=desc.strip()[:6000],
         ))

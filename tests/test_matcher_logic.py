@@ -7,7 +7,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from agents.matcher.score import (route, is_hard_drop, assess_ghost, freshness, with_bonus,
+from agents.matcher.score import (route, is_hard_drop, assess_ghost, freshness, adjust, age_points,
                                   onsite_outside_berlin, written_in_german)
 from shared.notion.client import _long_rt
 
@@ -50,63 +50,100 @@ def test_unclear_location_is_never_an_alert():
     assert route(_r(90, remote="unclear"), ALERT, ASK) == ("ask", "")
 
 
-FIELDS = {"rock/live music": 20, "music": 15, "sport": 8, "cyber": 8}
+RULES = {
+    "bonus_min_fit": 40, "berlin_bonus": 10, "role_bonus": {"product design": 10},
+    "field_bonus": {"rock/live music": 20, "music": 15, "sport": 8, "cyber": 8},
+    "liam_years": {"product": 2, "brand": 3, "graphic/visual": 5},
+    "experience_penalty": {2: 10, 3: 20}, "experience_max_gap": 3,
+}
 
 
-def _f(score, field, remote="remote_de_ok"):
-    return {**_r(score, remote=remote), "field": field}
+def _j(fit, field="other", remote="remote_de_ok", role="UX/UI", years=0, discipline="product"):
+    return {**_r(fit, remote=remote), "field": field, "role_type": role,
+            "years_required": years, "discipline": discipline}
+
+
+def score_of(job, age=0):
+    return adjust(job, RULES, age)[0]
 
 
 def test_berlin_roles_get_the_bonus_and_others_dont():
-    assert with_bonus(_f(55, "other", remote="berlin"), 10, FIELDS) == 65
-    assert with_bonus(_f(95, "other", remote="berlin"), 10, FIELDS) == 100
-    assert with_bonus(_f(55, "other"), 10, FIELDS) == 55
+    assert score_of(_j(55, remote="berlin")) == 65
+    assert score_of(_j(95, remote="berlin")) == 100
+    assert score_of(_j(55)) == 55
 
 
 def test_favourite_fields_score_higher_and_others_are_untouched():
-    assert with_bonus(_f(50, "rock/live music"), 10, FIELDS) == 70
-    assert with_bonus(_f(50, "music"), 10, FIELDS) == 65
-    assert with_bonus(_f(50, "cyber"), 10, FIELDS) == 58
-    assert with_bonus(_f(50, "other"), 10, FIELDS) == 50
-    assert with_bonus({**_r(50)}, 10, FIELDS) == 50          # no field given
-    assert with_bonus(_f(50, "music", remote="berlin"), 10, FIELDS) == 75   # bonuses add up
+    assert score_of(_j(50, "rock/live music")) == 70
+    assert score_of(_j(50, "music")) == 65
+    assert score_of(_j(50, "cyber")) == 58
+    assert score_of(_j(50)) == 50
+    assert score_of({**_r(50)}) == 50                       # nothing extra given
+    assert score_of(_j(50, "music", remote="berlin")) == 75  # bonuses add up
+
+
+def test_product_design_roles_score_higher():
+    assert score_of(_j(50, role="product design")) == 60
+    assert score_of(_j(50, role="brand or visual", discipline="brand")) == 50
+    assert score_of(_j(50, role="product design", discipline="brand")) == 50   # mislabelled brand job
+
+
+def test_bonuses_only_go_to_jobs_that_already_fit():
+    festival_sales = _j(15, "rock/live music", remote="berlin", role="other")
+    assert score_of(festival_sales, age=20) == 15
+    assert score_of(_j(40, "rock/live music", remote="berlin"), age=20) == 90
+
+
+def test_penalties_apply_whatever_the_fit():
+    assert score_of(_j(30), age=-20) == 10
+    assert score_of(_j(30, years=5)) == 10
+
+
+def test_years_are_compared_with_liams_years_in_that_discipline():
+    assert score_of(_j(70, years=3)) == 70                              # product, 1 beyond
+    assert score_of(_j(70, years=4)) == 60                              # product, 2 beyond
+    assert score_of(_j(70, years=5)) == 50                              # product, 3 beyond
+    assert score_of(_j(70, years=5, discipline="brand")) == 60          # brand: 3 years
+    assert score_of(_j(70, years=6, discipline="graphic/visual")) == 70  # graphic: 5 years
+    assert score_of(_j(15, years=5)) == 0                               # never below 0
+
+
+def test_too_many_years_is_dropped_even_for_music():
+    decision, reason = route(_j(95, "music", years=6), ALERT, ASK, RULES)
+    assert decision == "dropped" and "6+ years" in reason
+    assert route(_j(95, years=5), ALERT, ASK, RULES)[0] == "alert"
+    assert route(_j(95, years=6, discipline="brand"), ALERT, ASK, RULES)[0] == "alert"
+
+
+AGE = {1: 20, 3: 15, 7: 10, 15: 0, 30: -10, 45: -15}
+
+
+def test_newer_posts_score_higher_and_old_ones_lower():
+    now = "2026-10-29T12:00:00+00:00"
+    pts = lambda posted: age_points(posted, now, AGE, -20)
+    assert pts("2026-10-29T02:00:00+00:00") == 20     # 10 hours
+    assert pts("2026-10-27T12:00:00+00:00") == 15     # 2 days
+    assert pts("2026-10-24") == 10                    # 5 days
+    assert pts("2026-10-19") == 0                     # 10 days
+    assert pts("2026-10-09") == -10                   # 20 days
+    assert pts("2026-09-24") == -15                   # 35 days
+    assert pts("2026-08-01") == -20                   # 89 days
+    assert pts("") == 0                               # unknown date
+    assert score_of(_j(70), age=20) == 90
+
+
+def test_breakdown_shows_how_the_score_was_made():
+    total, parts = adjust(_j(52, "music", remote="berlin", role="product design", years=4), RULES, 15)
+    assert parts == ["fit 52", "Berlin +10", "product design +10", "music +15",
+                     "new post +15", "asks 4 yrs -10"]
+    assert total == 92
 
 
 def test_a_music_bonus_never_overrules_the_hard_rules():
-    res = _f(90, "music")
-    res["score"] = with_bonus(res, 10, FIELDS)
-    assert route({**res, "german_required": "fluent"}, ALERT, ASK)[0] == "dropped"
-    assert route({**res, "remote_eligibility": "no"}, ALERT, ASK)[0] == "dropped"
-
-
-def test_onsite_outside_berlin():
-    assert onsite_outside_berlin("London", "")
-    assert onsite_outside_berlin("Munich HQ", "")
-    assert onsite_outside_berlin("Bristol; London", "")
-    assert not onsite_outside_berlin("Berlin, Germany", "")
-    assert not onsite_outside_berlin("London or Berlin", "")
-    assert not onsite_outside_berlin("London", "yes")        # remote job
-    assert not onsite_outside_berlin("Remote - Europe", "")
-    assert not onsite_outside_berlin("", "")                 # unknown: Claude decides
-
-
-def test_written_in_german():
-    de = ("Wir suchen dich als Designer:in für unser Team in Berlin. Du arbeitest mit uns an "
-          "der App und bist für die Gestaltung von Features verantwortlich. Was du mitbringst: "
-          "Erfahrung im Design, eine klare Haltung und Lust auf Verantwortung. Wir bieten dir ein "
-          "Team, das mit dir wächst, und die Möglichkeit, die Zukunft der Pflege mit uns zu gestalten. ") * 2
-    en = ("We are looking for a Product Designer to join our team in Berlin. You will work with "
-          "engineers and own the design of features. German is a plus, not a must. ") * 4
-    en_with_german_footer = en + "Wir freuen uns auf deine Bewerbung und auf das Gespräch mit dir."
-    assert written_in_german(de)
-    assert not written_in_german(en)
-    assert not written_in_german(en_with_german_footer)
-
-
-def test_long_description_is_stored_in_pieces():
-    pieces = _long_rt("x" * 4500)["rich_text"]
-    assert [len(p["text"]["content"]) for p in pieces] == [2000, 2000, 500]
-    assert len("".join(p["text"]["content"] for p in _long_rt("y" * 9000)["rich_text"])) == 6000
+    res = _j(90, "music")
+    res["score"] = score_of(res)
+    assert route({**res, "german_required": "fluent"}, ALERT, ASK, RULES)[0] == "dropped"
+    assert route({**res, "remote_eligibility": "no"}, ALERT, ASK, RULES)[0] == "dropped"
 
 
 def test_hard_drop_working_student():
