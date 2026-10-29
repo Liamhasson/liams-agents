@@ -68,6 +68,7 @@ def run(limit: int | None = None, rescore: bool = False, dry_run: bool = False,
 
     counts = {"alert": 0, "ask": 0, "dropped": 0}
     results = []
+    tried = failed = 0
     for page in jobs:
         title = plain_title(page)
         company = plain_text(page, "Company")
@@ -85,10 +86,12 @@ def run(limit: int | None = None, rescore: bool = False, dry_run: bool = False,
             res = {"score": 0, "role_type": "other", "fit_summary": "", "why_you": "",
                    "gaps": "", "flags": [], "german_required": "none", "remote_eligibility": "unclear"}
         else:
+            tried += 1
             try:
                 res = score(claude, profile, title=title, company=company,
                             location=location, remote=remote, description=desc)
             except Exception as e:
+                failed += 1
                 print(f"  ! scoring failed for {title[:40]}: {e}")
                 continue
             # Don't infer ghost from a missing/thin description (that's our data gap,
@@ -142,6 +145,10 @@ def run(limit: int | None = None, rescore: bool = False, dry_run: bool = False,
     print(f"\nMatcher done → {counts['alert']} alert, {counts['ask']} ask, "
           f"{counts['dropped']} dropped.  {claude.cost_summary()}"
           + ("  [dry-run: nothing written]" if dry_run else ""))
+    if tried and failed == tried:
+        # One bad job is skipped quietly; all of them failing means Claude itself is broken.
+        raise RuntimeError(f"Every scoring call failed ({failed} of {tried}). The jobs stay New "
+                           "and are retried next run.")
     return {"counts": counts, "results": results}
 
 

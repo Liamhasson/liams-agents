@@ -119,6 +119,9 @@ class Claude:
     def _cli(self, system: str, prompt: str, schema: Optional[dict] = None) -> dict:
         """One `claude -p` call on the subscription. No tools, no customisations, no history."""
         env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}  # never bill the API here
+        if "CLAUDE_CODE_OAUTH_TOKEN" in env:
+            # A token copied from a wrapped terminal line can carry line breaks; a token never has spaces.
+            env["CLAUDE_CODE_OAUTH_TOKEN"] = "".join(env["CLAUDE_CODE_OAUTH_TOKEN"].split())
         with tempfile.TemporaryDirectory() as tmp:
             sys_path = os.path.join(tmp, "system.txt")
             with open(sys_path, "w") as f:

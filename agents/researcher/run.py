@@ -97,7 +97,7 @@ def run(limit: int | None = None, dry_run: bool = False) -> dict:
         jobs = jobs[:limit]
     print(f"Researching {len(jobs)} approved job(s)...")
 
-    done = 0
+    done = failed = 0
     for page in jobs:
         title, company = plain_title(page), plain_text(page, "Company")
         desc = plain_text(page, "Description")
@@ -113,6 +113,7 @@ def run(limit: int | None = None, dry_run: bool = False) -> dict:
             res = claude.json_call(SYSTEM, user, RESEARCH_SCHEMA,
                                    tool_name="submit_research", max_tokens=1200)
         except Exception as e:
+            failed += 1
             print(f"  ! research failed for {title[:40]}: {e}")
             continue
         notes = _notes_text(res)
@@ -125,6 +126,8 @@ def run(limit: int | None = None, dry_run: bool = False) -> dict:
     usage.log_run(notion, claude, "researcher")
     print(f"Researcher done → {done} job(s).  {claude.cost_summary()}"
           + ("  [dry-run]" if dry_run else ""))
+    if failed and not done:
+        raise RuntimeError(f"Every research call failed ({failed}). The jobs are retried next run.")
     return {"researched": done}
 
 

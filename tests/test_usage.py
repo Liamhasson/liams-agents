@@ -59,6 +59,18 @@ def test_subscription_call_never_bills_the_api_and_counts_usage():
     assert (c.calls, c.input_tokens, c.output_tokens, c.cost_usd) == (1, 1500, 200, 0.004)
 
 
+def test_a_token_with_line_breaks_is_joined_back_into_one_line():
+    seen, orig = {}, claude_mod.subprocess.run
+    os.environ["CLAUDE_CODE_OAUTH_TOKEN"] = "sk-ant-oat01-abc\ndef \r\n"
+    try:
+        claude_mod.subprocess.run = _fake_run({"is_error": False, "result": "ok"}, seen)
+        Claude().chat("system", [{"role": "user", "content": "hi"}])
+    finally:
+        claude_mod.subprocess.run = orig
+        os.environ.pop("CLAUDE_CODE_OAUTH_TOKEN", None)
+    assert seen["env"]["CLAUDE_CODE_OAUTH_TOKEN"] == "sk-ant-oat01-abcdef"
+
+
 def test_subscription_error_is_raised_with_the_reason():
     seen, orig = {}, claude_mod.subprocess.run
     try:
