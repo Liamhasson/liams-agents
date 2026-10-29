@@ -125,6 +125,7 @@ def _run_session(replies, revised_letter=FINAL):
         (session.learn, "save_reference"): lambda *a: saved.append(a[1]),
         (session.learn, "add_never_again"): lambda *a: added.append(a[1:]),
         (session.config, "require"): lambda key: "42",
+        (session.usage, "log_run"): lambda *a: None,
     }
     originals = {k: getattr(*k) for k in fakes}
     try:

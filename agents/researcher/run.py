@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import re
 
+from shared import usage
 from shared.claude import Claude, SONNET
 from shared.http import PoliteClient
 from shared.notion import NotionClient
@@ -82,6 +83,9 @@ def run(limit: int | None = None, dry_run: bool = False) -> dict:
     notion = NotionClient()
     ids = notion.ensure_databases()
     jobs_db, companies_db = ids["Jobs"], ids["Companies"]
+    if usage.over_limit(notion):
+        print("Monthly usage limit reached: research paused (see config/settings.yaml > usage).")
+        return {"researched": 0, "paused": True}
     claude = Claude(model=SONNET)
     http = PoliteClient()
 
@@ -118,6 +122,7 @@ def run(limit: int | None = None, dry_run: bool = False) -> dict:
         done += 1
 
     http.close()
+    usage.log_run(notion, claude, "researcher")
     print(f"Researcher done → {done} job(s).  {claude.cost_summary()}"
           + ("  [dry-run]" if dry_run else ""))
     return {"researched": done}

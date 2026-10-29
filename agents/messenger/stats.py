@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from shared import config
+from shared import config, usage
 from shared.telegram import Telegram
 from shared.notion import NotionClient
 from shared.notion.client import plain_title, plain_select, plain_number, plain_date
@@ -56,6 +56,11 @@ def run(dry_run: bool = False) -> dict:
         "", "<b>Top sources</b> (jobs found):",
     ]
     lines += [f"• {name} — {n}" for name, n in top if n]
+
+    total, per_agent = usage.month_total(notion, now)
+    lines += ["", f"<b>Claude usage this month</b> (API-equivalent, paid by your subscription): "
+                  f"${total:.2f} of ${usage.limit_usd():.0f}"]
+    lines += [f"• {agent} — ${spent:.2f}" for agent, spent in sorted(per_agent.items(), key=lambda x: -x[1])]
     text = "\n".join(lines)
 
     if dry_run:

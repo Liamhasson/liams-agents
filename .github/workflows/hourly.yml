@@ -12,7 +12,9 @@ jobs:
     env:
       NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
       NOTION_ROOT_PAGE_ID: ${{ secrets.NOTION_ROOT_PAGE_ID }}
-      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      # Claude runs on Liam's subscription through Claude Code (made with `claude setup-token`),
+      # so the agents cost nothing extra. No API key here, so nothing is billed per token.
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
     steps:
@@ -22,6 +24,8 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -r requirements.txt
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
       - name: Hunt (collect + dedupe)
         run: python -m agents.hunter.run
       - name: Match (score new jobs)

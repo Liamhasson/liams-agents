@@ -97,6 +97,16 @@ matcher:
     - working student
     - werkstudent
 
+# --- Usage (BUILD_BRIEF §15) -------------------------------------------------
+# The agents run on Liam's Claude subscription, so they cost nothing extra.
+# This limit is on the API-equivalent value of what they use, to protect his
+# own Claude allowance and catch runaway loops. Telegram warns at warn_at; at
+# 100% the background agents (Matcher, Researcher) pause until next month or
+# until the limit is raised. The Writer keeps working: Liam starts it himself.
+usage:
+  monthly_limit_usd: 25
+  warn_at: 0.8
+
 # --- Messenger (Phase 4) ----------------------------------------------------
 messenger:
   # A posting not seen by the Hunter for this many days is treated as gone.

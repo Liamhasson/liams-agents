@@ -20,7 +20,7 @@ import sys
 import time
 from pathlib import Path
 
-from shared import config
+from shared import config, usage
 from shared.claude import Claude, SONNET
 from shared.telegram import Telegram
 from shared.notion import NotionClient
@@ -78,8 +78,12 @@ def _finalize(claude, notion, tg, chat, ctx, job_page_id, history) -> dict:
         print(f"  [review] {fix}")
     _save_drafts(notion, job_page_id, drafts)
     _send_pack(tg, chat, ctx, drafts)
+    reused = drafts.get("reused") or {}
+    note = ("\n\nReused word for word from packs you approved: "
+            + ", ".join(f"{n} line{'s' if n != 1 else ''} from {html.escape(t)}" for t, n in reused.items())
+            + ". Openings and closings are new." if reused else "")
     tg.send_message(chat, "Here's your pack — have a final look. Reply <b>approve</b> when happy, "
-                          "or tell me what to change. (Submitting comes in the next phase.)")
+                          f"or tell me what to change. (Submitting comes in the next phase.){note}")
     return drafts
 
 
@@ -89,8 +93,8 @@ def _revise(claude, notion, tg, chat, ctx, job_page_id, drafts, request) -> dict
               "cover_letter_markdown": res["cover_letter_markdown"]}
     _save_drafts(notion, job_page_id, drafts)
     _send_pack(tg, chat, ctx, drafts)
-    issues = (converse.lint(drafts["cv_markdown"], "CV", ctx.never_again)
-              + converse.lint(drafts["cover_letter_markdown"], "cover letter", ctx.never_again))
+    issues = (converse.voice_issues(ctx, drafts["cv_markdown"], "CV")
+              + converse.voice_issues(ctx, drafts["cover_letter_markdown"], "cover letter"))
     heads_up = f"\n\nHeads up, the check found: {', '.join(sorted(set(issues)))}" if issues else ""
     tg.send_message(chat, f"{html.escape(res['note'] + heads_up)}\n\n"
                           "Reply <b>approve</b> or tell me what else to change.")
@@ -197,12 +201,14 @@ def run(job_id: str | None = None, minutes: float = 25.0) -> dict:
     tg.send_message(chat, "Pausing for now — your progress is saved. Reply here anytime to keep going.")
     if phase != "writing":  # drafts exist; free the Telegram stream for the poller
         notion.update_page(job["id"], {"Status": {"select": {"name": "Ready to send"}}})
+    usage.log_run(notion, claude, "writer")
     print(f"Session timed out in phase '{phase}'. {claude.cost_summary()}")
     return {"drafted": int(phase != "writing"), "timed_out": True}
 
 
 def _finish(notion, job_page_id, claude, approved: bool) -> dict:
     notion.update_page(job_page_id, {"Status": {"select": {"name": "Ready to send"}}})
+    usage.log_run(notion, claude, "writer")
     print(f"Finalised. {claude.cost_summary()}")
     return {"drafted": 1, "approved": approved}
 

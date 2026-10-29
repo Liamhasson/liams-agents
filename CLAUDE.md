@@ -85,8 +85,12 @@ stop and tell Liam — removing it from history needs a force-push and his expli
 
 - Haiku: scoring, parsing WhatsApp replies, cheap classification.
 - Sonnet: research and writing, only after Liam approves a job.
-- Log token use per agent so cost stays visible. Monthly budget lives in `settings.yaml`;
-  warn Liam on WhatsApp at 80%.
+- Claude runs on Liam's Claude subscription through the Claude Code CLI (`shared/claude.py`,
+  `CLAUDE_CODE_OAUTH_TOKEN` on GitHub), so the agents cost nothing extra. Don't add
+  `ANTHROPIC_API_KEY` to workflows: it would bill the API.
+- Every run logs its usage (API-equivalent $) to the Notion "Usage" database. The monthly
+  limit lives in `settings.yaml > usage`; Telegram warns at 80%, and at 100% the Matcher
+  and Researcher pause.
 
 ---
 

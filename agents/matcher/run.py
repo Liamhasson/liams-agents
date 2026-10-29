@@ -17,6 +17,7 @@ from pathlib import Path
 
 import yaml
 
+from shared import usage
 from shared.claude import Claude
 from shared.notion import NotionClient
 from shared.notion.client import plain_title, plain_text, plain_select, plain_date
@@ -45,6 +46,9 @@ def run(limit: int | None = None, rescore: bool = False, dry_run: bool = False,
     notion = NotionClient()
     ids = notion.ensure_databases()
     jobs_db = ids["Jobs"]
+    if usage.over_limit(notion):
+        print("Monthly usage limit reached: matching paused (see config/settings.yaml > usage).")
+        return {"counts": {"alert": 0, "ask": 0, "dropped": 0}, "results": [], "paused": True}
     profile = load_profile(notion)
     claude = Claude()
 
@@ -133,6 +137,7 @@ def run(limit: int | None = None, rescore: bool = False, dry_run: bool = False,
                 props["Role type"] = {"select": {"name": res["role_type"]}}
             notion.update_page(page["id"], props)
 
+    usage.log_run(notion, claude, "matcher")
     _print_report(results)
     print(f"\nMatcher done → {counts['alert']} alert, {counts['ask']} ask, "
           f"{counts['dropped']} dropped.  {claude.cost_summary()}"

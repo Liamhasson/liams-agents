@@ -117,6 +117,20 @@ COMPANIES_SCHEMA: dict = {
     "Active": {"checkbox": {}},
 }
 
+# One row per agent run that used Claude (BUILD_BRIEF §15). "API-equivalent $" is
+# what the run cost, or would have cost, on the API; on the subscription it's free.
+USAGE_SCHEMA: dict = {
+    "Run": {"title": {}},
+    "Date": {"date": {}},
+    "Agent": _select("matcher", "researcher", "writer"),
+    "Backend": _select("subscription", "api"),
+    "Model": {"rich_text": {}},
+    "Calls": {"number": {"format": "number"}},
+    "Input tokens": {"number": {"format": "number"}},
+    "Output tokens": {"number": {"format": "number"}},
+    "API-equivalent $": {"number": {"format": "dollar"}},
+}
+
 # Lines Liam rejected, so the Writer never writes them again. Lives under Private
 # (not the root page), and an entry is only added after Liam confirms it.
 NEVER_AGAIN_SCHEMA: dict = {
@@ -133,4 +147,5 @@ DATABASES: dict[str, dict] = {
     "Freelance Leads": FREELANCE_LEADS_SCHEMA,
     "Sources": SOURCES_SCHEMA,
     "Companies": COMPANIES_SCHEMA,
+    "Usage": USAGE_SCHEMA,
 }
