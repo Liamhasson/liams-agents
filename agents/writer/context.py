@@ -24,6 +24,36 @@ class NeverAgain:
         return kind is None or self.applies_to in ("shared", kind)
 
 
+@dataclass(frozen=True)
+class Reference:
+    """A letter or CV Liam approved (Notion Private > Writer references)."""
+    title: str
+    kind: str  # "cover letter" or "CV"
+    company: str
+    role: str
+    role_type: str
+    approved: str  # ISO date
+    text: str
+
+
+_REF_META = {"Type": "kind", "Company": "company", "Role": "role",
+             "Role type": "role_type", "Approved": "approved"}
+
+
+def parse_reference(title: str, page_text: str) -> Reference:
+    """Reference pages start with 'Key: value' lines (see learn.save_reference), then the text."""
+    meta = {"kind": "cover letter", "company": "", "role": "", "role_type": "", "approved": ""}
+    lines = page_text.splitlines()
+    i = 0
+    while i < len(lines) and lines[i].split(":", 1)[0] in _REF_META and ":" in lines[i]:
+        key, value = lines[i].split(":", 1)
+        meta[_REF_META[key]] = value.strip()
+        i += 1
+    body = lines[i:]
+    text = "\n".join(body) if meta["kind"] == "CV" else "\n\n".join(body)
+    return Reference(title=title, text=text, **meta)
+
+
 @dataclass
 class WriterContext:
     job_page_id: str
@@ -38,6 +68,7 @@ class WriterContext:
     mytone: str
     base_cv: str
     never_again: list[NeverAgain] = field(default_factory=list)
+    references: list[Reference] = field(default_factory=list)
 
 
 def _private_page_id(notion: NotionClient) -> str | None:
@@ -100,6 +131,16 @@ def load_never_again(notion: NotionClient) -> list[NeverAgain]:
     return [e for e in entries if e.line.strip()]
 
 
+def load_references(notion: NotionClient) -> list[Reference]:
+    """Every approved letter and CV under Private > Writer references (empty if none yet)."""
+    root = notion.load_ids().get("Writer references")
+    if not root:
+        return []
+    return [parse_reference(b["child_page"]["title"], notion.page_text(b["id"]))
+            for b in notion._paginated("GET", f"/blocks/{root}/children?page_size=100")
+            if b.get("type") == "child_page"]
+
+
 def build_context(notion: NotionClient, job_page: dict) -> WriterContext:
     return WriterContext(
         job_page_id=job_page["id"],
@@ -114,4 +155,5 @@ def build_context(notion: NotionClient, job_page: dict) -> WriterContext:
         mytone=load_mytone(notion),
         base_cv=load_base_cv(notion),
         never_again=load_never_again(notion),
+        references=load_references(notion),
     )

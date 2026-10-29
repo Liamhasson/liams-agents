@@ -16,6 +16,7 @@ from __future__ import annotations
 import re
 
 from shared.claude import Claude
+from . import references
 from .context import NeverAgain, WriterContext
 
 WRITER_TEMP = 0.2  # low: hug Liam's examples, resist generic drift
@@ -121,7 +122,25 @@ def _rejected_block(entries: list[NeverAgain], kind: str | None = None) -> str:
     return "\n".join(lines) or "(none yet)"
 
 
-def build_system(ctx: WriterContext) -> str:
+REFERENCE_RULES = """APPROVED REFERENCES. These are letters and a CV Liam approved. They are his
+real writing and outrank the guide's example lines.
+- Openings and closings are never reused. Write them fresh for this company.
+- If you tell the same story as a story paragraph below, and every sentence in it is
+  still true and fits this job, copy that paragraph word for word.
+- Never reuse a paragraph that is about the other company: its name, product, team,
+  values or job post.
+- If a fact in a reference disagrees with his current CV or voice guide, the CV and
+  guide win. Change only that fact and keep the rest word for word.
+- In the CV, reuse approved bullet wording where the role and facts are the same."""
+
+
+def _references_section(ctx: WriterContext, kind: str | None = None) -> str:
+    text = references.block(references.pick(ctx), kind)
+    return f"\n{REFERENCE_RULES}\n\n=== APPROVED REFERENCES ===\n{text}\n=== END REFERENCES ===\n" if text else ""
+
+
+def build_system(ctx: WriterContext, with_references: bool = False) -> str:
+    refs = _references_section(ctx) if with_references else ""
     return f"""You are Liam Hasson's Writer. You co-write his job application WITH
 him over a Telegram chat, then produce his CV and (if he wants one) cover letter.
 
@@ -144,7 +163,7 @@ HOW TO TALK TO LIAM (this overrides any generic chat style):
 === LIAM'S VOICE GUIDE (mytone.md) ===
 {ctx.mytone}
 === END VOICE GUIDE ===
-
+{refs}
 === LIAM'S CURRENT CV ===
 {ctx.base_cv or '(none found)'}
 === END CV ===
@@ -223,6 +242,13 @@ def lint(text: str, kind: str = "cover letter",
     return issues
 
 
+def voice_issues(ctx: WriterContext, text: str, kind: str) -> list[str]:
+    """The lint for a real draft: rejected lines everywhere, style rules except on approved sentences."""
+    style = lint(references.without_approved(text, references.pick(ctx), kind), kind)
+    rejected = [i for i in lint(text, kind, ctx.never_again) if i.startswith("rejected line")]
+    return sorted(set(style + rejected))
+
+
 _REVIEW_SCHEMA = {
     "type": "object",
     "properties": {
@@ -262,9 +288,12 @@ def review(claude: Claude, ctx: WriterContext, draft: str, label: str,
         "unsupported claims entirely rather than softening them. Rewrite slogans and "
         "vague lines into something concrete from his stories, or cut them. When you "
         "cut a line, make sure the sentences around it still connect. Keep every true "
-        "fact, name and number. Keep the CV markdown structure as it is.\n\n"
+        "fact, name and number. Keep the CV markdown structure as it is. Sentences "
+        "copied word for word from his approved references below are his own words: "
+        "keep them as they are unless a fact in them is out of date.\n\n"
         + HARD_RULES
         + "\nLINES LIAM HAS REJECTED:\n" + _rejected_block(ctx.never_again, kind)
+        + _references_section(ctx, kind)
         + "\n\n=== VOICE GUIDE ===\n" + ctx.mytone
         + "\n=== END GUIDE ===\n\n=== CURRENT CV ===\n" + (ctx.base_cv or "(none)")
         + "\n=== END CV ===\n\n=== JOB POST AND RESEARCH ===\n"
@@ -349,7 +378,7 @@ def enforce_voice(claude: Claude, ctx: WriterContext, draft: str, label: str,
         return res["corrected"]
 
     def check_lint(text: str) -> list[str]:
-        return lint(text, kind, ctx.never_again)
+        return voice_issues(ctx, text, kind)
 
     def review_voice(text: str) -> tuple[str, bool]:
         res = review(claude, ctx, text, label, check_lint(text))
@@ -381,7 +410,8 @@ FINAL_SCHEMA = {
                     "purpose": {"type": "string", "description": "What this paragraph does (section 4)."},
                     "move": {"type": "string", "description": "The section 3 move it uses, if any."},
                     "modelled_on": {"type": "string",
-                                    "description": "The exact example line from sections 2, 3 or 7 it copies the rhythm of."},
+                                    "description": ("The exact example line from sections 2, 3 or 7, or the approved "
+                                                   "reference paragraph, it copies.")},
                     "facts": {
                         "type": "array",
                         "items": {
@@ -446,10 +476,11 @@ def finalize(claude: Claude, ctx: WriterContext, history: list[dict]) -> dict:
             "First read the whole voice guide again. Then fill voice_plan: for each "
             "cover letter paragraph pick the move, quote the real example line you'll "
             "model it on, and quote the source for every fact. Only then write the "
-            "letter from that plan, and the CV.\n"
+            "letter from that plan, and the CV. Use the approved references as the "
+            "rules for them say.\n"
             "If Liam chose no cover letter, return '' for cover_letter_markdown and an "
             "empty voice_plan.\n\n" + CV_FORMAT + "\n\nCONVERSATION:\n" + convo)
-    drafts = claude.json_call(build_system(ctx), user, FINAL_SCHEMA,
+    drafts = claude.json_call(build_system(ctx, with_references=True), user, FINAL_SCHEMA,
                               tool_name="submit_drafts", max_tokens=6000, temperature=WRITER_TEMP)
     # Mandatory review against the whole guide before anything ships.
     log: list[str] = []
@@ -457,4 +488,7 @@ def finalize(claude: Claude, ctx: WriterContext, history: list[dict]) -> dict:
     drafts["cover_letter_markdown"] = enforce_voice(
         claude, ctx, drafts["cover_letter_markdown"], "cover letter", log)
     drafts["review_log"] = log
+    picked = references.pick(ctx)
+    drafts["reused"] = {**references.reused(drafts["cv_markdown"], picked, "CV"),
+                        **references.reused(drafts["cover_letter_markdown"], picked, "cover letter")}
     return drafts
