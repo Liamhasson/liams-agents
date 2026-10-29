@@ -31,7 +31,7 @@ def fetch(client: PoliteClient, slug: str, company: str = "") -> list[Job]:
                 job_id=str(j.get("id", "")),
                 location=loc,
                 remote=is_remote(loc, cats.get("commitment", ""), j.get("text", "")),
-                description=(j.get("descriptionPlain", "") or "")[:5000],
+                description=(j.get("descriptionPlain", "") or "")[:6000],
             ))
         if jobs:
             break  # found the right region

@@ -35,6 +35,16 @@ def _rt(s: str) -> dict:
     return {"rich_text": [{"type": "text", "text": {"content": (s or "")[:_MAX_TEXT]}}]}
 
 
+# Notion caps each text piece at 2,000 characters, so long text goes in as several pieces.
+_MAX_DESCRIPTION = 6000  # what the Matcher reads
+
+
+def _long_rt(s: str) -> dict:
+    s = (s or "")[:_MAX_DESCRIPTION]
+    return {"rich_text": [{"type": "text", "text": {"content": s[i:i + 2000]}}
+                          for i in range(0, len(s), 2000)]}
+
+
 def _title(s: str) -> dict:
     return {"title": [{"type": "text", "text": {"content": (s or "")[:_MAX_TEXT]}}]}
 
@@ -225,7 +235,7 @@ class NotionClient:
         if job.role_type:
             props["Role type"] = {"select": {"name": job.role_type}}
         if job.description:
-            props["Description"] = _rt(job.description)
+            props["Description"] = _long_rt(job.description)
         if job.score is not None:
             props["Score"] = {"number": job.score}
         if job.fit_summary:
@@ -259,15 +269,15 @@ class NotionClient:
         """
         existing = self.find_job(jobs_db_id, job)
         if existing:
-            # Track that we saw it again (repost/age signal) and backfill a
-            # missing description — without touching First seen / Status / Score.
+            # Track that we saw it again (repost/age signal) and backfill a missing
+            # or cut-short description — without touching First seen / Status / Score.
             seen = (plain_number(existing, "Times seen") or 1) + 1
             update: dict = {
                 "Times seen": {"number": seen},
                 "Last seen at": {"date": {"start": datetime.now(timezone.utc).isoformat()}},
             }
-            if job.description and not plain_text(existing, "Description"):
-                update["Description"] = _rt(job.description)
+            if len((job.description or "")[:_MAX_DESCRIPTION]) > len(plain_text(existing, "Description")) + 100:
+                update["Description"] = _long_rt(job.description)
             self.update_page(existing["id"], update)
             return existing, False
         return self.create_page(jobs_db_id, self.job_to_properties(job)), True

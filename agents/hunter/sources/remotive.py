@@ -29,6 +29,6 @@ def fetch(client: PoliteClient, endpoint: str = "https://remotive.com/api/remote
             location=j.get("candidate_required_location", "") or "",
             remote="yes",
             posted_at=(j.get("publication_date") or "")[:10],
-            description=desc.strip()[:5000],
+            description=desc.strip()[:6000],
         ))
     return jobs

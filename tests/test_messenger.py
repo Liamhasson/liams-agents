@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from agents.messenger.compose import job_card, ask_card, job_id_for_callback
 from agents.messenger.poll import _uuid
+from agents.messenger.send import send_order
 
 
 def _page(**over):
@@ -25,7 +26,10 @@ def _page(**over):
         "Why Liam": {"type": "rich_text", "rich_text": [{"plain_text": "You ship fast"}]},
         "Gaps": {"type": "rich_text", "rich_text": [{"plain_text": ""}]},
         "URL": {"type": "url", "url": "https://acme.com/jobs/1"},
+        "Field": {"type": "select", "select": {"name": over.pop("field", "other")}},
+        "Remote eligibility": {"type": "select", "select": {"name": over.pop("elig", "berlin")}},
     }
+    props["Score"]["number"] = over.pop("score", 72)
     return {"id": "407be63a-05ad-8160-bb8f-ed832bc3d9c2", "properties": props}
 
 
@@ -54,6 +58,22 @@ def test_ask_card_yes_no():
     datas = {d for row in buttons for (l, d) in row}
     jid = job_id_for_callback(_page())
     assert f"yes:{jid}" in datas and f"no:{jid}" in datas
+
+
+def test_music_jobs_are_sent_first_then_berlin():
+    remote_music = _page(field="music", elig="remote_de_ok", score=61)
+    berlin_top = _page(score=95)
+    remote_top = _page(elig="remote_de_ok", score=99)
+    order = sorted([remote_top, berlin_top, remote_music], key=send_order)
+    assert order == [remote_music, berlin_top, remote_top]
+
+
+def test_job_card_shows_the_field():
+    text, _ = job_card(_page(field="rock/live music"))
+    assert "🎸 rock/live music" in text
+    text, _ = job_card(_page(field="sport"))
+    assert "· sport" in text
+    assert "other" not in job_card(_page())[0]
 
 
 def test_uuid_roundtrip():

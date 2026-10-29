@@ -36,6 +36,10 @@ JOB_STATUSES = [
 
 JOB_FLAGS = ["senior", "experience gap", "borderline", "contract", "unpaid", "ghost"]
 
+# The company's field. Liam's favourites score higher (settings.yaml > matcher > field_bonus).
+FIELDS = ["rock/live music", "music", "sport", "travel", "nature", "animals",
+          "innovative tech", "cyber", "other"]
+
 
 JOBS_SCHEMA: dict = {
     "Title": {"title": {}},
@@ -49,6 +53,7 @@ JOBS_SCHEMA: dict = {
     "Posted at": {"date": {}},
     "First seen at": {"date": {}},
     "Role type": _select(*ROLE_TYPES),
+    "Field": _select(*FIELDS),
     "Description": {"rich_text": {}},
     "German required": _select("none", "basic", "fluent"),
     "Remote eligibility": _select("berlin", "remote_de_ok", "unclear", "no"),

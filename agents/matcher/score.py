@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import re
+
 from shared.claude import Claude
-from shared.notion.schema import ROLE_TYPES, JOB_FLAGS
+from shared.notion.schema import ROLE_TYPES, JOB_FLAGS, FIELDS
+
+MUSIC_FIELDS = ("rock/live music", "music")
 
 SCHEMA = {
     "type": "object",
@@ -15,13 +19,15 @@ SCHEMA = {
         "why_you": {"type": "string", "description": "2 lines tying it to Liam's real work; no invention."},
         "gaps": {"type": "string", "description": "Honest gaps, e.g. 'asks for 5+ yrs'. '' if none."},
         "flags": {"type": "array", "items": {"type": "string", "enum": JOB_FLAGS}},
+        "field": {"type": "string", "enum": FIELDS,
+                  "description": "What the COMPANY works in (not the role)."},
         "german_required": {"type": "string", "enum": ["none", "basic", "fluent"]},
         "remote_eligibility": {"type": "string", "enum": ["berlin", "remote_de_ok", "unclear", "no"]},
         "ghost_risk": {"type": "string", "enum": ["low", "medium", "high"],
                        "description": "Likelihood this is an evergreen/ghost post, from the text."},
         "ghost_reason": {"type": "string", "description": "One short phrase; '' if low."},
     },
-    "required": ["score", "role_type", "fit_summary", "why_you", "gaps", "flags",
+    "required": ["score", "role_type", "field", "fit_summary", "why_you", "gaps", "flags",
                  "german_required", "remote_eligibility", "ghost_risk", "ghost_reason"],
 }
 
@@ -37,14 +43,28 @@ Scoring guidance:
 - 40-69: adjacent or partial mismatch (seniority gap, unclear remote eligibility,
   only loosely a design role) — worth asking Liam about.
 - 0-39: wrong field, senior-only (5+ yrs product design / Lead / Principal),
-  requires fluent German, or not hirable in Germany.
+  requires German, or not hirable in Germany.
+- Score the fit only. Don't add points for Berlin or for the company's field:
+  those bonuses are added afterwards.
 
 Rules:
-- german_required: 'fluent' if the post needs business/fluent German or
-  "Deutsch fließend / verhandlungssicher"; 'basic' if nice-to-have; else 'none'.
-- remote_eligibility: 'berlin' if Berlin-based; 'remote_de_ok' if remote and can
-  employ someone living in Germany/EU; 'no' if it excludes Germany or needs
-  relocation elsewhere; 'unclear' if you truly can't tell.
+- german_required: 'fluent' whenever German is REQUIRED at any level (e.g.
+  "gute Deutschkenntnisse", "German B1/B2/C1", "Deutsch fließend /
+  verhandlungssicher", "German is a must") or the post itself is written in
+  German. 'basic' only if German is explicitly a plus / nice-to-have. Else 'none'.
+- remote_eligibility: 'berlin' if the role is in Berlin (office or hybrid);
+  'remote_de_ok' if fully remote and can employ someone living in Germany/EU;
+  'no' if it is on-site or hybrid in any city other than Berlin (London, Paris,
+  Munich, ...), excludes Germany, or needs relocation; 'unclear' only when the
+  post gives no location at all.
+- field: what the company works in. 'rock/live music' for rock or live music
+  (concerts, venues, festivals, touring, ticketing, rock labels/media); 'music'
+  for any other music company (labels like UMG, streaming, instruments and gear,
+  music apps, music tech); 'sport'; 'travel'; 'nature' (outdoors, climate,
+  environment); 'animals' (pets, vets, wildlife); 'innovative tech' only when the
+  product itself is new technology (AI models or agents, robotics, space, new
+  hardware, deep tech); 'cyber' (cybersecurity, defence tech). Software tools,
+  productivity, finance, B2B SaaS and marketplaces are 'other', even if they use AI.
 - flags: add 'senior' for senior/lead/principal; 'experience gap' if it asks for
   more product-design years than Liam has; 'contract'/'unpaid' where stated.
 - why_you and gaps must be grounded only in Liam's real experience. Never invent.
@@ -140,15 +160,52 @@ def is_hard_drop(title: str, description: str, keywords: list[str]) -> bool:
 def route(result: dict, alert: int, ask: int) -> tuple[str, str]:
     """Map a scored result to a decision: 'alert' | 'ask' | 'dropped', plus a reason."""
     if result.get("german_required") == "fluent":
-        return "dropped", "requires fluent German"
+        return "dropped", "requires German"
     if result.get("remote_eligibility") == "no":
         return "dropped", "not Berlin / not hirable in Germany"
     sc = int(result["score"])
     if sc < ask:
         return "dropped", f"low score ({sc})"
-    if sc < alert:
-        return "ask", ""
+    if sc < alert or result.get("remote_eligibility") == "unclear":
+        return "ask", ""  # an unclear location is a question for Liam, never an alert
     return "alert", ""
+
+
+def with_bonus(result: dict, berlin: int, fields: dict[str, int]) -> int:
+    """The score plus Liam's bonuses: Berlin roles and his favourite fields. Capped at 100."""
+    sc = int(result["score"])
+    if result.get("remote_eligibility") == "berlin":
+        sc += berlin
+    sc += int(fields.get(result.get("field", "other"), 0))
+    return min(100, sc)
+
+
+# Locations that can still suit Liam when a job isn't marked remote.
+_OK_PLACES = ("berlin", "germany", "deutschland", "remote", "europe", "emea", "eu",
+              "worldwide", "anywhere", "global")
+
+
+def onsite_outside_berlin(location: str, remote: str) -> bool:
+    """True for an office/hybrid job in a named place that isn't Berlin (no Claude call needed)."""
+    loc = (location or "").lower()
+    if not loc.strip() or remote == "yes":
+        return False  # unknown or remote: the Matcher decides
+    return not any(re.search(rf"\b{p}\b", loc) for p in _OK_PLACES)
+
+
+_GERMAN = {"und", "der", "die", "das", "mit", "für", "wir", "du", "dich", "dein", "deine",
+           "ihr", "bei", "von", "ist", "eine", "einen", "auf", "zu", "uns", "unser", "unsere",
+           "werden", "oder", "nicht", "auch", "als", "sowie", "im", "den", "dem", "des", "bist"}
+_ENGLISH = {"and", "the", "with", "for", "we", "you", "your", "our", "is", "are", "to", "of",
+            "on", "a", "be", "will", "as", "or", "this", "that", "who", "what"}
+
+
+def written_in_german(text: str) -> bool:
+    """True when the post is mostly German. A German post means German is needed."""
+    words = re.findall(r"[a-zäöüß]+", (text or "").lower())
+    de = sum(w in _GERMAN for w in words)
+    en = sum(w in _ENGLISH for w in words)
+    return de >= 20 and de > 1.5 * en
 
 
 def score(claude: Claude, profile: str, *, title: str, company: str,

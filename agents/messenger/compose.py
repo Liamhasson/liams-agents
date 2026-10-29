@@ -7,6 +7,7 @@ from shared.notion.client import (
 )
 
 PRIORITY_EMOJI = {"fresh": "🔥", "recent": "🟢", "older": "·"}
+FIELD_EMOJI = {"rock/live music": "🎸", "music": "🎵"}
 
 
 def _esc(s: str) -> str:
@@ -34,7 +35,10 @@ def job_card(page: dict) -> tuple[str, list]:
     url = plain_url(page, "URL") or plain_url(page, "Apply URL")
 
     head = f"{PRIORITY_EMOJI.get(prio, '')} 🆕 <b>{title}</b> at <b>{company}</b>"
+    field = plain_select(page, "Field")
     sub = f"{loc}" + (f" · {remote}" if remote else "") + f" · {score}/100 · via {source}"
+    if field and field != "other":
+        sub += " · " + " ".join(filter(None, [FIELD_EMOJI.get(field), field]))
     lines = [head, sub, ""]
     if ghost in ("medium", "high"):
         lines.append(f"⚠️ <i>possible ghost/evergreen post ({ghost})</i>")

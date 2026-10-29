@@ -63,6 +63,6 @@ def fetch(client: PoliteClient, endpoint: str, source_name: str = "",
             location="Remote" if is_remote(raw_title, desc) else "",
             remote=is_remote(raw_title, desc),
             posted_at=pub,
-            description=desc.strip()[:5000],
+            description=desc.strip()[:6000],
         ))
     return jobs

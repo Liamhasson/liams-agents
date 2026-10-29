@@ -26,6 +26,13 @@ _CONFIG = Path(__file__).resolve().parent.parent.parent / "config" / "settings.y
 _PRIO = {"fresh": 0, "recent": 1, "older": 2}
 
 
+def send_order(page: dict) -> tuple:
+    """Music first, then Berlin, then fresh, then highest score — "apply first" ordering."""
+    return (plain_select(page, "Field") not in ("rock/live music", "music"),
+            plain_select(page, "Remote eligibility") != "berlin",
+            _PRIO.get(plain_select(page, "Priority"), 1), -(plain_number(page, "Score") or 0))
+
+
 def run(limit: int | None = None, dry_run: bool = False) -> dict:
     mcfg = yaml.safe_load(_CONFIG.read_text()).get("matcher", {})
     alert = int(mcfg.get("alert_threshold", 60))
@@ -40,8 +47,7 @@ def run(limit: int | None = None, dry_run: bool = False) -> dict:
         {"property": "Status", "select": {"equals": "New"}},
         {"property": "Score", "number": {"greater_than_or_equal_to": ask}},
     ]})
-    # Fresh first, then highest score — "apply first" ordering.
-    pending.sort(key=lambda p: (_PRIO.get(plain_select(p, "Priority"), 1), -(plain_number(p, "Score") or 0)))
+    pending.sort(key=send_order)
     if limit:
         pending = pending[:limit]
 

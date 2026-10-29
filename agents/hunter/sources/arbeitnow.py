@@ -26,6 +26,6 @@ def fetch(client: PoliteClient, endpoint: str = "https://www.arbeitnow.com/api/j
             job_id=str(j.get("slug", ""))[:120],
             location=loc,
             remote=remote,
-            description=desc.strip()[:5000],
+            description=desc.strip()[:6000],
         ))
     return jobs

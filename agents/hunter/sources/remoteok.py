@@ -31,6 +31,6 @@ def fetch(client: PoliteClient, endpoint: str = "https://remoteok.com/api",
             location=j.get("location", "") or "Remote",
             remote="yes",
             posted_at=(j.get("date") or "")[:10],
-            description=desc.strip()[:5000],
+            description=desc.strip()[:6000],
         ))
     return jobs

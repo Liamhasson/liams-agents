@@ -31,6 +31,6 @@ def fetch(client: PoliteClient, slug: str, company: str = "") -> list[Job]:
             location=loc,
             remote=remote,
             posted_at=(j.get("created_at") or "")[:10],
-            description=(j.get("description", "") or "")[:5000],
+            description=(j.get("description", "") or "")[:6000],
         ))
     return jobs

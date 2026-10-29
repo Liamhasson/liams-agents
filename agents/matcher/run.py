@@ -23,7 +23,8 @@ from shared.notion import NotionClient
 from shared.notion.client import plain_title, plain_text, plain_select, plain_date
 from shared.notion.schema import ROLE_TYPES
 from .profile import load_profile
-from .score import score, route, is_hard_drop, assess_ghost, freshness
+from .score import (score, route, is_hard_drop, assess_ghost, freshness, with_bonus,
+                    onsite_outside_berlin, written_in_german)
 
 _CONFIG = Path(__file__).resolve().parent.parent.parent / "config" / "settings.yaml"
 
@@ -42,6 +43,8 @@ def run(limit: int | None = None, rescore: bool = False, dry_run: bool = False,
     alert = int(cfg.get("alert_threshold", 70))
     ask = int(cfg.get("ask_threshold", 40))
     hard_drops = [k.lower() for k in cfg.get("hard_drop_title_keywords", [])]
+    berlin = int(cfg.get("berlin_bonus", 0))
+    fields = cfg.get("field_bonus", {}) or {}
 
     notion = NotionClient()
     ids = notion.ensure_databases()
@@ -80,9 +83,17 @@ def run(limit: int | None = None, rescore: bool = False, dry_run: bool = False,
         posted = plain_date(page, "Posted at")
         priority = freshness(posted, now_iso)
         ghost_risk, ghost_reason = "low", ""
-        # Deterministic hard drop (working-student etc.) — saves a Claude call.
+        # Deterministic hard drops — each saves a Claude call.
         if is_hard_drop(title, desc, hard_drops):
-            decision, reason, sc = "dropped", "working-student role", 0
+            reason = "working-student role"
+        elif written_in_german(desc):
+            reason = "posting is in German"
+        elif onsite_outside_berlin(location, remote):
+            reason = f"on-site outside Berlin ({location[:40]})"
+        else:
+            reason = ""
+        if reason:
+            decision, sc = "dropped", 0
             res = {"score": 0, "role_type": "other", "fit_summary": "", "why_you": "",
                    "gaps": "", "flags": [], "german_required": "none", "remote_eligibility": "unclear"}
         else:
@@ -106,7 +117,8 @@ def run(limit: int | None = None, rescore: bool = False, dry_run: bool = False,
                 now_iso,
             )
             ghost_reason = " · ".join(filter(None, [res.get("ghost_reason", "")] + greasons))
-            sc = int(res["score"])  # ghost is a warning only — it never changes the score
+            res["score"] = with_bonus(res, berlin, fields)  # ghost is a warning only — it never changes the score
+            sc = int(res["score"])
             decision, reason = route(res, alert, ask)
 
         flags = list(res.get("flags", []))
@@ -131,6 +143,7 @@ def run(limit: int | None = None, rescore: bool = False, dry_run: bool = False,
                 "Flags": {"multi_select": [{"name": f} for f in flags]},
                 "German required": {"select": {"name": res["german_required"]}},
                 "Remote eligibility": {"select": {"name": res["remote_eligibility"]}},
+                "Field": {"select": {"name": res.get("field") or "other"}},
                 "Priority": {"select": {"name": priority}},
                 "Ghost risk": {"select": {"name": ghost_risk}},
                 "Ghost reason": _rt(ghost_reason),
