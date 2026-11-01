@@ -80,14 +80,20 @@ def run(dry_run: bool = False) -> dict:
     kept = [(j, pid) for (j, pid) in collected if title_passes(j.title, cfg)]
     print(f"\nCollected {len(collected)} jobs, {len(kept)} pass the design title gate.")
 
-    created = deduped = 0
+    created = deduped = failed = 0
     found_by_origin: dict[str, int] = {}
     new_by_origin: dict[str, int] = {}
     for j, pid in kept:
         found_by_origin[pid] = found_by_origin.get(pid, 0) + 1
         if dry_run:
             continue
-        _page, was_created = notion.upsert_job(jobs_db, j)
+        # One job Notion rejects shouldn't stop the other jobs from being saved.
+        try:
+            _page, was_created = notion.upsert_job(jobs_db, j)
+        except Exception as e:
+            failed += 1
+            print(f"  ! couldn't save {j.title} at {j.company}: {e}")
+            continue
         if was_created:
             created += 1
             new_by_origin[pid] = new_by_origin.get(pid, 0) + 1
@@ -110,9 +116,13 @@ def run(dry_run: bool = False) -> dict:
             })
 
     client.close()
-    summary = {"collected": len(collected), "kept": len(kept), "created": created, "deduped": deduped}
-    print(f"\nHunter done → created {created} new, {deduped} already seen (deduped)."
+    summary = {"collected": len(collected), "kept": len(kept), "created": created,
+               "deduped": deduped, "failed": failed}
+    print(f"\nHunter done → created {created} new, {deduped} already seen (deduped)"
+          + (f", {failed} couldn't be saved" if failed else "") + "."
           + ("  [dry-run: nothing written]" if dry_run else ""))
+    if failed and not (created or deduped):
+        raise RuntimeError(f"Notion rejected all {failed} jobs — see the errors above.")
     return summary
 
 

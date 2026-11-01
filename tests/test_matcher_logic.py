@@ -188,6 +188,14 @@ def test_ghost_repost_detected():
     assert risk == "high" and any("reposted" in r for r in reasons)
 
 
+def test_long_description_pieces_fit_notion_even_with_emoji():
+    # Notion counts an emoji as 2 characters; a 2,000-char piece with emoji in it was rejected.
+    text = ("🚀 We build " + "x" * 90) * 60
+    pieces = [p["text"]["content"] for p in _long_rt(text)["rich_text"]]
+    assert all(sum(2 if ord(c) > 0xFFFF else 1 for c in p) <= 2000 for p in pieces)
+    assert "".join(pieces) == text[:6000]
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     for fn in fns:

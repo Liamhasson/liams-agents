@@ -26,13 +26,33 @@ NOTION_VERSION = "2022-06-28"
 API = "https://api.notion.com/v1"
 _IDS_PATH = Path(__file__).resolve().parent.parent.parent / "config" / "notion_ids.json"
 
-# Notion rich_text accepts at most 2000 chars per text object. Some characters
-# (emoji / non-BMP) count as 2 on Notion's side, so we keep headroom.
+# Notion rich_text accepts at most 2000 chars per text object, counted the way
+# JavaScript counts them: an emoji (or any non-BMP character) is 2, not 1.
+_NOTION_LIMIT = 2000
 _MAX_TEXT = 1900
 
 
+def _notion_len(ch: str) -> int:
+    return 2 if ord(ch) > 0xFFFF else 1
+
+
+def _pieces(s: str, limit: int = _NOTION_LIMIT) -> list[str]:
+    """Split s into pieces that each fit Notion's limit, never cutting an emoji in half."""
+    out, cur, n = [], [], 0
+    for ch in s:
+        w = _notion_len(ch)
+        if n + w > limit:
+            out.append("".join(cur))
+            cur, n = [], 0
+        cur.append(ch)
+        n += w
+    if cur:
+        out.append("".join(cur))
+    return out
+
+
 def _rt(s: str) -> dict:
-    return {"rich_text": [{"type": "text", "text": {"content": (s or "")[:_MAX_TEXT]}}]}
+    return {"rich_text": [{"type": "text", "text": {"content": (_pieces((s or "")[:_MAX_TEXT]) or [""])[0]}}]}
 
 
 # Notion caps each text piece at 2,000 characters, so long text goes in as several pieces.
@@ -41,8 +61,7 @@ _MAX_DESCRIPTION = 6000  # what the Matcher reads
 
 def _long_rt(s: str) -> dict:
     s = (s or "")[:_MAX_DESCRIPTION]
-    return {"rich_text": [{"type": "text", "text": {"content": s[i:i + 2000]}}
-                          for i in range(0, len(s), 2000)]}
+    return {"rich_text": [{"type": "text", "text": {"content": p}} for p in _pieces(s)]}
 
 
 def _title(s: str) -> dict:
