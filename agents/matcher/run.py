@@ -131,9 +131,9 @@ def run(limit: int | None = None, rescore: bool = False, dry_run: bool = False,
         if ghost_risk in ("medium", "high") and "ghost" not in flags:
             flags.append("ghost")
         status = "Skipped" if decision == "dropped" else "New"
-        fit = res["fit_summary"]
+        summary = res["fit_summary"]
         if reason:
-            fit = f"[dropped: {reason}] {fit}".strip()
+            summary = f"[dropped: {reason}] {summary}".strip()
 
         counts[decision] += 1
         results.append((sc, decision, title, company, flags, res, reason, priority))
@@ -141,7 +141,7 @@ def run(limit: int | None = None, rescore: bool = False, dry_run: bool = False,
         if not dry_run:
             props = {
                 "Score": {"number": sc},
-                "Fit summary": _rt(fit),
+                "Fit summary": _rt(summary),
                 "Why Liam": _rt(res["why_you"]),
                 "Gaps": _rt(res["gaps"]),
                 "Flags": {"multi_select": [{"name": f} for f in flags]},
