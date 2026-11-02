@@ -69,23 +69,27 @@ CV_CSS = f"""
 
 body {{
     font-family: {FONT_STACK};
-    font-size: 8.5pt;
-    line-height: 1.3;
+    font-size: 9.35pt;
+    line-height: 1.33;
     color: {INK};
 }}
 {HEADER_CSS}
+/* CV header runs a touch larger than the cover letter's */
+.cv-name {{ font-size: 20.9pt; }}
+.cv-subtitle {{ font-size: 11pt; margin-top: 3.6px; }}
+.cv-contact {{ font-size: 8.8pt; margin-top: 4.8px; }}
 
 /* ── Section headers: uppercase, tracked, dark rule underneath ── */
 h2 {{
-    font-size: 9pt;
+    font-size: 9.9pt;
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 1.2px;
     color: {INK};
     border-bottom: 0.75pt solid {INK};
-    padding-bottom: 3px;
-    margin-top: 11px;
-    margin-bottom: 6px;
+    padding-bottom: 3.6px;
+    margin-top: 13.3px;
+    margin-bottom: 7.3px;
 }}
 
 /* ── Entry header: bold title left, italic grey date right ── */
@@ -93,26 +97,26 @@ h2 {{
     display: flex;
     justify-content: space-between;
     align-items: baseline;
-    margin-top: 6px;
+    margin-top: 7.3px;
 }}
 h2 + .role-header {{ margin-top: 0; }}
-.role-title {{ font-weight: 700; font-size: 9pt; }}
-.role-date  {{ font-style: italic; color: {MUTED}; font-size: 8.5pt; white-space: nowrap; padding-left: 10px; }}
-.role-desc  {{ font-style: italic; color: {MUTED}; margin-top: 2px; }}
+.role-title {{ font-weight: 700; font-size: 9.9pt; }}
+.role-date  {{ font-style: italic; color: {MUTED}; font-size: 9.35pt; white-space: nowrap; padding-left: 10px; }}
+.role-desc  {{ font-style: italic; color: {MUTED}; margin-top: 2.4px; }}
 
 /* ── Bullets ── */
-ul {{ list-style: none; margin-top: 3px; }}
-ul li {{ position: relative; padding-left: 14px; margin-bottom: 2.5px; }}
+ul {{ list-style: none; margin-top: 3.6px; }}
+ul li {{ position: relative; padding-left: 14px; margin-bottom: 3px; }}
 ul li::before {{
     content: "•";
     position: absolute;
     left: 4px;
-    font-size: 7pt;
+    font-size: 7.7pt;
     line-height: 1.6;
 }}
 
 /* ── Paragraphs + label lines (skills, languages) ── */
-p {{ margin-bottom: 3px; }}
+p {{ margin-bottom: 3.6px; }}
 """
 
 COVER_LETTER_CSS = f"""
