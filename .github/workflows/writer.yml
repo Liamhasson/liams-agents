@@ -1,8 +1,13 @@
 name: Writer — live co-writing session
 
-# Triggered by the poller when Liam taps Apply, or run manually.
+# Started by the Telegram webhook (api/telegram.py) when Liam taps Apply, or run manually.
 on:
   workflow_dispatch:
+    inputs:
+      job:
+        description: "Notion job page id (empty = next approved job)"
+        required: false
+        default: ""
 
 # One writing session at a time.
 concurrency:
@@ -34,4 +39,6 @@ jobs:
       - name: Research (ensure notes exist)
         run: python -m agents.researcher.run
       - name: Co-writing session
-        run: python -m agents.writer.session --minutes 28
+        env:
+          JOB: ${{ inputs.job }}
+        run: python -m agents.writer.session --minutes 28 ${JOB:+--job "$JOB"}

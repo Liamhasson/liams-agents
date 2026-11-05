@@ -1,8 +1,9 @@
 """Minimal Telegram Bot API client.
 
 Telegram has no 24-hour window, no templates and no per-message fees, so this is
-much simpler than a WhatsApp integration: send messages with inline buttons, and
-read updates (taps + replies) by polling.
+much simpler than a WhatsApp integration: send messages with inline buttons.
+Updates (taps + replies) arrive instantly at the webhook (`api/telegram.py`);
+`get_updates` polling is only the backup when no webhook is set.
 """
 
 from __future__ import annotations
@@ -70,6 +71,22 @@ class Telegram:
         if not result.get("ok"):
             raise RuntimeError(f"Telegram sendDocument failed: {result}")
         return result["result"]
+
+    def set_webhook(self, url: str, secret: str) -> dict:
+        return self._post("setWebhook", {
+            "url": url, "secret_token": secret,
+            "allowed_updates": ["message", "callback_query"],
+        })
+
+    def delete_webhook(self) -> dict:
+        return self._post("deleteWebhook", {})
+
+    def webhook_info(self) -> dict:
+        return self._post("getWebhookInfo", {})
+
+    def webhook_url(self) -> str:
+        """The webhook URL Telegram delivers to, or '' when none is set."""
+        return self.webhook_info().get("url", "")
 
     def get_updates(self, offset: Optional[int] = None, timeout: int = 0) -> list[dict]:
         payload: dict = {"timeout": timeout, "allowed_updates": ["message", "callback_query"]}

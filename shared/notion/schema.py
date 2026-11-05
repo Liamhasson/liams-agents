@@ -75,6 +75,9 @@ JOBS_SCHEMA: dict = {
     "Last reminder at": {"date": {}},
     "Reminder count": {"number": {"format": "number"}},
     "Telegram message id": {"number": {"format": "number"}},
+    # While a live Writer session runs, Liam's typed messages go to the Inbox
+    # until this time. A date (not just the status) so a crashed session expires.
+    "Session until": {"date": {}},
     "Research notes": {"rich_text": {}},
     "CV draft": {"rich_text": {}},
     "Cover letter draft": {"rich_text": {}},
@@ -149,6 +152,17 @@ NEVER_AGAIN_SCHEMA: dict = {
     "Application": {"rich_text": {}},
 }
 
+# Liam's typed Telegram messages during a live Writer session. The webhook owns
+# the Telegram stream, so it drops them here and the Writer reads them.
+INBOX_SCHEMA: dict = {
+    "Text": {"title": {}},          # a short preview
+    "Full text": {"rich_text": {}},  # the whole message, in several pieces
+    "Job": {"rich_text": {}},
+    "Received at": {"date": {}},
+    "Read": {"checkbox": {}},
+    "Telegram update id": {"number": {"format": "number"}},
+}
+
 # Order matters only for how they appear in the page.
 DATABASES: dict[str, dict] = {
     "Jobs": JOBS_SCHEMA,
@@ -156,4 +170,5 @@ DATABASES: dict[str, dict] = {
     "Sources": SOURCES_SCHEMA,
     "Companies": COMPANIES_SCHEMA,
     "Usage": USAGE_SCHEMA,
+    "Inbox": INBOX_SCHEMA,
 }

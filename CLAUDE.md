@@ -67,6 +67,13 @@ python orchestrator.py                        # live run
 
 - Local secrets live in `.env` (gitignored, never committed). See `.env.example` for keys.
 - The daily GitHub Action (`.github/workflows/job_agent.yml`) runs on `ubuntu-24.04`.
+- **Telegram taps and messages go to a webhook**, `api/telegram.py` on Vercel, so they're answered
+  instantly. The logic lives in `agents/messenger/handle.py`. Apply starts `writer.yml` with
+  `GITHUB_DISPATCH_TOKEN`. During a Writer session, Liam's messages are saved to the Notion
+  "Inbox" database and the Writer reads them from there. Telegram allows only one receiver, so
+  never call `getUpdates` while the webhook is set. `scripts/set_telegram_webhook.py` turns the
+  webhook on or off (`--status` to check). `poll.py` is the manual backup for when it's off.
+  Don't put Telegram on a GitHub cron again: GitHub ran the 5-minute schedule 3–4 times a day.
 - PDFs are rendered with **Playwright/Chromium**, not WeasyPrint. Don't re-add WeasyPrint
   system deps to the workflow.
 

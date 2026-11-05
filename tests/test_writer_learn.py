@@ -76,16 +76,22 @@ def test_confirm_message_escapes_html():
 
 # ---- the session flow, with Telegram, Notion and Claude faked ----------------
 
-class FakeTelegram:
-    def __init__(self, replies):
-        self.replies, self.sent, self.next_id = list(replies), [], 1
+class FakeInbox:
+    """Liam's replies as the webhook would have saved them to the Notion Inbox."""
 
-    def get_updates(self, offset=None, timeout=0):
-        if not self.replies:
-            return []
-        upd = {"update_id": self.next_id, "message": {"chat": {"id": "42"}, "text": self.replies.pop(0)}}
-        self.next_id += 1
-        return [upd]
+    def __init__(self, replies):
+        self.replies, self.drained = list(replies), False
+
+    def drain(self):
+        self.drained = True
+
+    def wait(self, seconds):
+        return [self.replies.pop(0)] if self.replies else []
+
+
+class FakeTelegram:
+    def __init__(self):
+        self.sent = []
 
     def send_message(self, chat, text, buttons=None):
         self.sent.append(text)
@@ -96,18 +102,20 @@ class FakeTelegram:
 
 class FakeNotion:
     def __init__(self):
-        self.updates = []
+        self.updates, self.sessions = [], []
 
     def update_page(self, page_id, props):
-        self.updates.append(props)
+        if list(props) == ["Session until"]:
+            self.sessions.append(props["Session until"]["date"])
+        else:
+            self.updates.append(props)
 
     def ensure_databases(self):
         return {"Jobs": "jobs"}
 
 
 def _run_session(replies, revised_letter=FINAL):
-    # The session drains one batch of old updates first, so lead with a stale message.
-    tg, notion, saved, added = FakeTelegram(["(old message)"] + replies), FakeNotion(), [], []
+    tg, notion, inbox, saved, added = FakeTelegram(), FakeNotion(), FakeInbox(replies), [], []
     ctx = WriterContext("job1", "Designer", "Acme", "Berlin", "product design", "", "", "", "",
                         "", "", [NeverAgain("Already banned.", "x")])
     first = {"cv_markdown": "# Sam\n- Led the launch.", "cover_letter_markdown": FIRST, "review_log": []}
@@ -116,6 +124,8 @@ def _run_session(replies, revised_letter=FINAL):
         (session, "Telegram"): lambda: tg,
         (session, "Claude"): lambda model=None: type("C", (), {"cost_summary": lambda self: ""})(),
         (session, "_pick_job"): lambda n, db, j: {"id": "job1"},
+        (session, "_open_inbox"): lambda n, ids, j: inbox,
+        (session, "_offer_next"): lambda *a: None,
         (session.ctxmod, "build_context"): lambda n, job: ctx,
         (session.converse, "opening"): lambda c, x: "Hi",
         (session.converse, "finalize"): lambda c, x, h: dict(first),
@@ -135,7 +145,17 @@ def _run_session(replies, revised_letter=FINAL):
     finally:
         for (mod, name), orig in originals.items():
             setattr(mod, name, orig)
+    assert inbox.drained, "old Inbox messages must be cleared before the session starts"
+    # The session marks itself live for the webhook, then always clears it at the end.
+    assert len(notion.sessions) == 2 and notion.sessions[0] and notion.sessions[-1] is None
     return result, tg, notion, saved, added
+
+
+def test_session_without_drafts_goes_back_to_approved_on_timeout():
+    result, tg, notion, *_ = _run_session([])
+    assert result == {"drafted": 0, "timed_out": True}
+    assert notion.updates[-1] == {"Status": {"select": {"name": "Approved"}}}
+    assert "start again" in tg.sent[-1]
 
 
 def test_session_counts_edits_saves_references_and_adds_only_picked_lines():

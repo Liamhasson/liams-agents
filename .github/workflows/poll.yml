@@ -1,8 +1,9 @@
 name: Poll — Telegram replies
 
+# Backup only. Taps and messages normally go straight to the Telegram webhook
+# (api/telegram.py on Vercel). This does nothing while the webhook is set; run it
+# by hand after `python scripts/set_telegram_webhook.py --off`.
 on:
-  schedule:
-    - cron: "*/5 * * * *"   # every ~5 min (GitHub may delay under load)
   workflow_dispatch:
 
 # Avoid overlapping poll runs stepping on each other.
@@ -14,14 +15,12 @@ jobs:
   poll:
     runs-on: ubuntu-24.04
     timeout-minutes: 8
-    permissions:
-      actions: write        # to trigger the Writer session on Apply
     env:
       NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
       NOTION_ROOT_PAGE_ID: ${{ secrets.NOTION_ROOT_PAGE_ID }}
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GITHUB_DISPATCH_TOKEN: ${{ secrets.GITHUB_DISPATCH_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

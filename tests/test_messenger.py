@@ -8,7 +8,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from agents.messenger.compose import job_card, ask_card, job_id_for_callback
-from agents.messenger.poll import _uuid
+from agents.messenger.handle import uuid as _uuid
 from agents.messenger.send import send_order
 
 

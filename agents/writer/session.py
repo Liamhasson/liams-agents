@@ -1,8 +1,12 @@
 """Live co-writing session over Telegram.
 
 Picks an approved, researched job and co-writes the application WITH Liam in
-near-real-time (long-polling). On "done" it writes drafts to Notion, renders
-one-page PDFs and sends them for a final look. Liam then asks for changes or
+near-real-time. On "done" it writes drafts to Notion, renders
+one-page PDFs and sends them for a final look.
+
+Liam's replies reach the Writer through the Notion Inbox: the Telegram webhook
+(`api/telegram.py`) owns the update stream and drops his messages there while
+this job's "Session until" is in the future. Liam then asks for changes or
 replies "approve". On approve the Writer counts the lines he changed, saves the
 approved pack as a reference, and asks once which changed lines go on his
 "Never again" list (docs/workplan-writer-learns.md, step 3).
@@ -18,13 +22,14 @@ import argparse
 import html
 import sys
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from shared import config, usage
 from shared.claude import Claude, SONNET
 from shared.telegram import Telegram
 from shared.notion import NotionClient
-from shared.notion.client import plain_title, plain_text
+from shared.notion.client import plain_checkbox, plain_number, plain_title, plain_text
 from modules.pdf.generator import generate_cv_pdf, generate_cover_letter_pdf
 from . import context as ctxmod
 from . import converse
@@ -35,6 +40,68 @@ DONE_WORDS = {"done", "finalize", "finalise", "finish", "ready", "that's it",
               "looks good", "make the pdf", "make pdf", "ship it"}
 APPROVE_WORDS = {"approve", "approved", "i approve", "approve it", "looks good", "perfect"}
 OUTPUT_DIR = Path(__file__).resolve().parent.parent.parent / "output"
+POLL_SECONDS = 3
+
+
+class Inbox:
+    """Liam's messages for one job, as the webhook saved them to Notion."""
+
+    def __init__(self, notion, db_id: str, job_id: str):
+        self.notion, self.db, self.job = notion, db_id, job_id
+
+    def _unread(self) -> list[dict]:
+        rows = self.notion.query_database(self.db, {"and": [
+            {"property": "Read", "checkbox": {"equals": False}},
+            {"property": "Job", "rich_text": {"equals": self.job}},
+        ]})
+        return sorted(rows, key=lambda r: plain_number(r, "Telegram update id") or 0)
+
+    def _take(self, rows: list[dict]) -> list[str]:
+        texts = []
+        for r in rows:
+            if plain_checkbox(r, "Read"):
+                continue
+            self.notion.update_page(r["id"], {"Read": {"checkbox": True}})
+            texts.append(plain_text(r, "Full text") or plain_title(r))
+        return texts
+
+    def drain(self) -> None:
+        """Mark leftovers from an earlier session as read, so we only react to new replies."""
+        self._take(self._unread())
+
+    def wait(self, seconds: float) -> list[str]:
+        """Return new messages as soon as any arrive, or [] after `seconds`."""
+        end = time.monotonic() + seconds
+        while True:
+            texts = self._take(self._unread())
+            if texts or time.monotonic() >= end:
+                return texts
+            time.sleep(POLL_SECONDS)
+
+
+def _open_inbox(notion, ids: dict, job_id: str) -> Inbox:
+    return Inbox(notion, ids["Inbox"], job_id)
+
+
+def _session_until(notion, job_page_id: str, until: datetime | None) -> None:
+    """Mark the session live (the webhook routes Liam's messages here) or over."""
+    value = {"start": until.isoformat(timespec="seconds")} if until else None
+    notion.update_page(job_page_id, {"Session until": {"date": value}})
+
+
+def _offer_next(notion, tg, chat, jobs_db: str, current_id: str) -> None:
+    """If more approved jobs are waiting, offer to write the next one."""
+    try:
+        waiting = [p for p in notion.query_database(jobs_db, {"and": [
+            {"property": "Status", "select": {"equals": "Approved"}},
+            {"property": "CV draft", "rich_text": {"is_empty": True}},
+        ]}) if p["id"] != current_id]
+    except Exception:
+        return
+    if waiting:
+        nxt = waiting[0]
+        tg.send_message(chat, f"Next approved job waiting: <b>{html.escape(plain_title(nxt))}</b>",
+                        [[("▶️ Write it", f"resume:{nxt['id'].replace('-', '')}")]])
 
 
 def _rt(s: str) -> dict:
@@ -131,10 +198,10 @@ def _add_picked(notion, tg, chat, ctx, pending, picks) -> None:
 
 def run(job_id: str | None = None, minutes: float = 25.0) -> dict:
     notion = NotionClient()
-    jobs_db = notion.ensure_databases()["Jobs"]
+    ids = notion.ensure_databases()
+    jobs_db = ids["Jobs"]
     tg = Telegram()
     chat = config.require("TELEGRAM_CHAT_ID")
-    allowed = str(chat)
     claude = Claude(model=SONNET)
 
     job = _pick_job(notion, jobs_db, job_id)
@@ -145,12 +212,18 @@ def run(job_id: str | None = None, minutes: float = 25.0) -> dict:
     notion.update_page(job["id"], {"Status": {"select": {"name": "Drafting"}}})
     print(f"Co-writing: {ctx.title} @ {ctx.company}")
 
-    # Drain old updates so we only react to new replies.
-    offset = None
-    seed = tg.get_updates()
-    if seed:
-        offset = seed[-1]["update_id"] + 1
+    inbox = _open_inbox(notion, ids, job["id"])
+    inbox.drain()
+    _session_until(notion, job["id"], datetime.now(timezone.utc) + timedelta(minutes=minutes))
+    try:
+        result = _converse(notion, tg, chat, claude, ctx, job, inbox, minutes)
+    finally:
+        _session_until(notion, job["id"], None)
+    _offer_next(notion, tg, chat, jobs_db, job["id"])
+    return result
 
+
+def _converse(notion, tg, chat, claude, ctx, job, inbox, minutes) -> dict:
     history: list[dict] = []
     opening = converse.opening(claude, ctx)
     tg.send_message(chat, opening)
@@ -160,13 +233,8 @@ def run(job_id: str | None = None, minutes: float = 25.0) -> dict:
     phase, first, drafts, pending = "writing", None, None, []
     deadline = time.monotonic() + minutes * 60
     while time.monotonic() < deadline:
-        updates = tg.get_updates(offset=offset, timeout=50)
-        for upd in updates:
-            offset = upd["update_id"] + 1
-            msg = upd.get("message") or {}
-            if str(msg.get("chat", {}).get("id")) != allowed or not msg.get("text"):
-                continue
-            text = msg["text"].strip()
+        for text in inbox.wait(min(50.0, max(0.0, deadline - time.monotonic()))):
+            text = text.strip()
             low = text.lower()
             if low.startswith("mytone:"):
                 append_rule(notion, text.split(":", 1)[1].strip())
@@ -198,9 +266,10 @@ def run(job_id: str | None = None, minutes: float = 25.0) -> dict:
                 _add_picked(notion, tg, chat, ctx, pending, picks)
                 return _finish(notion, job["id"], claude, approved=True)
 
-    tg.send_message(chat, "Pausing for now — your progress is saved. Reply here anytime to keep going.")
-    if phase != "writing":  # drafts exist; free the Telegram stream for the poller
-        notion.update_page(job["id"], {"Status": {"select": {"name": "Ready to send"}}})
+    tg.send_message(chat, "Pausing for now, your progress is saved." + (
+        "" if phase != "writing" else " Send me any message and tap <b>Write</b> to start again."))
+    # Drafts exist → Ready to send. No drafts yet → back to Approved, so "Write it" can restart it.
+    notion.update_page(job["id"], {"Status": {"select": {"name": "Ready to send" if phase != "writing" else "Approved"}}})
     usage.log_run(notion, claude, "writer")
     print(f"Session timed out in phase '{phase}'. {claude.cost_summary()}")
     return {"drafted": int(phase != "writing"), "timed_out": True}

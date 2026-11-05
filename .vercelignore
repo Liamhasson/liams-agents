@@ -1,0 +1,7 @@
+# Only the webhook (api/) and the code it imports (agents/, shared/, config/) need to deploy.
+.env
+output/
+tests/
+docs/
+base_documents/
+**/__pycache__/
