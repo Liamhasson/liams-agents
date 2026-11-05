@@ -162,6 +162,24 @@ def assess_ghost(llm_risk: str, first_seen_at: str, posted_at: str, now_iso: str
     return risk, reasons
 
 
+def avoided_industry(title: str, company: str, description: str, rules: dict) -> str:
+    """The industry Liam avoids that this job is in ('' if none). See settings > avoid_industries.
+
+    Whole words only, so "cryptography" or "decentralised teams" don't count.
+    """
+    head = f"{title} {company}".lower()
+    body = (description or "").lower()
+    for name, rule in (rules or {}).items():
+        words = [w.lower() for w in rule.get("words", [])]
+        need = int(rule.get("min_mentions", 3))
+        pats = [re.compile(rf"\b{re.escape(w)}\b") for w in words]
+        if any(p.search(head) for p in pats):
+            return name
+        if sum(len(p.findall(body)) for p in pats) >= need:
+            return name
+    return ""
+
+
 def is_hard_drop(title: str, description: str, keywords: list[str]) -> bool:
     blob = f"{title} {description}".lower()
     return any(k.lower() in blob for k in keywords)

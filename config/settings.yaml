@@ -45,9 +45,9 @@ filter:
     - Deutschkenntnisse erforderlich
     - Deutsch fließend
 
-notification:
-  recipient_email: "liamhasson@gmail.com"
-  sender_email: "liamhasson@gmail.com"
+# Old Gmail notifier (orchestrator.py). The address lives in .env as NOTIFY_EMAIL,
+# because this repo is public.
+notification: {}
 
 schedule:
   cron: "0 8 * * *"  # 8am daily
@@ -134,6 +134,14 @@ matcher:
   hard_drop_title_keywords:
     - working student
     - werkstudent
+  # Industries Liam won't work in. A job is dropped when one of these words is in
+  # the title or company name, or shows up `min_mentions` times in the description
+  # (one passing mention in a fintech post is fine). Fintech itself is fine.
+  avoid_industries:
+    crypto:
+      min_mentions: 3
+      words: [crypto, cryptocurrency, cryptocurrencies, web3, web 3, blockchain, defi,
+              nft, nfts, stablecoin, stablecoins]
 
 # --- Usage (BUILD_BRIEF §15) -------------------------------------------------
 # The agents run on Liam's Claude subscription, so they cost nothing extra.

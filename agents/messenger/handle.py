@@ -13,12 +13,13 @@ from __future__ import annotations
 
 import html
 import os
+import re
 from datetime import datetime, timezone
 from typing import Callable, Optional
 
 import httpx
 
-from shared.notion.client import _long_rt, _title, plain_select, plain_text, plain_title
+from shared.notion.client import _long_rt, _title, plain_number, plain_select, plain_text, plain_title
 from .compose import details_text
 
 # A decision is only valid while the job is still awaiting Liam.
@@ -27,11 +28,26 @@ APPLY_WORDS = {"apply", "yes", "y", "go", "✅", "👍"}
 SKIP_WORDS = {"skip", "no", "n", "⏭", "👎"}
 GREETINGS = {"/start", "start", "hi", "hello", "hey", "/help", "help"}
 
+JOBS_COMMAND = re.compile(r"^/?(?:show |open |my )?jobs(?: (\d{1,3}))?\??$")
+JOBS_SHOWN = 8
+
 DEFAULT_REPO = "Liamhasson/liams-agents"
+_SETTINGS = os.path.join(os.path.dirname(__file__), "..", "..", "config", "settings.yaml")
+
+
+def alert_threshold() -> int:
+    """The Matcher's 'strong match' score (settings > matcher > alert_threshold)."""
+    try:
+        import yaml
+        with open(_SETTINGS) as fh:
+            return int((yaml.safe_load(fh).get("matcher") or {}).get("alert_threshold", 70))
+    except Exception:
+        return 70
 
 HELP = ("Here's what I understand:\n"
         "• Tap <b>Apply</b>, <b>Skip</b> or <b>Tell me more</b> on a job.\n"
         "• Or reply <b>apply</b>, <b>skip</b> or <b>more</b> to a job message.\n"
+        "• Send <b>jobs</b> to see your open matches (or <b>jobs 60</b> for a lower score).\n"
         "• While we're writing an application together, just talk to me normally.")
 
 
@@ -193,6 +209,9 @@ class Handler:
             return "not-mine"
         raw = (msg.get("text") or "").strip()
         text = raw.lower()
+        jobs_cmd = JOBS_COMMAND.match(text)
+        if jobs_cmd:  # answered here, even mid-session: the Writer can't see other jobs
+            return self._list_jobs(int(jobs_cmd.group(1)) if jobs_cmd.group(1) else alert_threshold())
         # A reply to a job card is a decision on that job, even mid-session.
         card = self._card_replied_to(msg)
         if card and (text in APPLY_WORDS or text in SKIP_WORDS or text == "more"):
@@ -216,6 +235,30 @@ class Handler:
             self.tg.send_message(self.chat, "Hi Liam 👋 Matched design jobs arrive here.\n\n" + HELP)
             return "greeting"
         return self._help()
+
+    def _list_jobs(self, min_score: int) -> str:
+        """Open matches (still waiting for Liam's decision) at or above `min_score`."""
+        rows = self.notion.query_database(self.jobs_db, {"and": [
+            {"or": [{"property": "Status", "select": {"equals": s}} for s in sorted(PRE_ACTION)]},
+            {"property": "Score", "number": {"greater_than_or_equal_to": min_score}},
+        ]})
+        rows.sort(key=lambda p: plain_number(p, "Score") or 0, reverse=True)
+        if not rows:
+            self.tg.send_message(self.chat, f"No open jobs scoring {min_score} or more right now. "
+                                            f"Try <b>jobs {max(min_score - 20, 0)}</b> for lower scores.")
+            return "jobs-none"
+        shown = rows[:JOBS_SHOWN]
+        lines = [f"<b>{len(rows)} open job{'s' if len(rows) != 1 else ''} scoring {min_score}+</b>"
+                 + (f" (top {JOBS_SHOWN})" if len(rows) > JOBS_SHOWN else "") + ":"]
+        buttons = []
+        for i, p in enumerate(shown, 1):
+            company = plain_text(p, "Company")
+            lines.append(f"{i}. <b>{plain_number(p, 'Score') or 0}</b> · {html.escape(plain_title(p))}"
+                         + (f" at {html.escape(company)}" if company else ""))
+            jid = p["id"].replace("-", "")
+            buttons.append([(f"✅ Apply {i}", f"apply:{jid}"), (f"ℹ️ More {i}", f"more:{jid}")])
+        self.tg.send_message(self.chat, "\n".join(lines), buttons)
+        return "jobs"
 
     def _card_replied_to(self, msg: dict) -> Optional[dict]:
         reply = msg.get("reply_to_message")

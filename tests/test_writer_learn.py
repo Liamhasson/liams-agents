@@ -158,6 +158,18 @@ def test_session_without_drafts_goes_back_to_approved_on_timeout():
     assert "start again" in tg.sent[-1]
 
 
+def test_drop_ends_the_session_and_skips_the_job():
+    result, tg, notion, *_ = _run_session(["Drop this. I don't want to work in crypto."])
+    assert result == {"drafted": 0, "dropped": True}
+    assert notion.updates[-1] == {"Status": {"select": {"name": "Skipped"}}}
+    assert "Dropped" in tg.sent[-1]
+
+
+def test_drop_words_dont_catch_ordinary_edits():
+    assert session.wants_drop("drop") and session.wants_drop("cancel this.")
+    assert not session.wants_drop("stop using dashes") and not session.wants_drop("drop the second bullet")
+
+
 def test_session_counts_edits_saves_references_and_adds_only_picked_lines():
     result, tg, notion, saved, added = _run_session(["done", "swap the invented line", "approve", "1"])
     assert result == {"drafted": 1, "approved": True}

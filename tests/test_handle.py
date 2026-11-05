@@ -42,7 +42,7 @@ class FakeNotion:
 
     def __init__(self, page=None, live=None, card_for=None, waiting=()):
         self.page, self.live, self.card_for, self.waiting = page or _page(), live, card_for, list(waiting)
-        self.updates, self.created = [], []
+        self.updates, self.created, self.open_jobs = [], [], []
 
     def get_page(self, page_id):
         assert page_id == PAGE_ID
@@ -61,6 +61,9 @@ class FakeNotion:
             return [self.live] if self.live else []
         if filter.get("property") == "Telegram message id":
             return [self.page] if filter["number"]["equals"] == self.card_for else []
+        if "Score" in str(filter):
+            self.last_jobs_filter = filter
+            return list(self.open_jobs)
         return self.waiting  # Approved + no CV draft
 
 
@@ -219,3 +222,29 @@ def test_webhook_rejects_wrong_or_missing_secret():
             os.environ.pop("TELEGRAM_WEBHOOK_SECRET", None)
         else:
             os.environ["TELEGRAM_WEBHOOK_SECRET"] = saved
+
+
+def _scored(title, score, company="Acme"):
+    p = _page(title=title)
+    p["properties"]["Score"] = {"type": "number", "number": score}
+    p["properties"]["Company"] = {"type": "rich_text", "rich_text": [{"plain_text": company}]}
+    return p
+
+
+def test_jobs_command_lists_open_matches_best_first_with_buttons():
+    notion = FakeNotion()
+    notion.open_jobs = [_scored("Designer A", 72), _scored("Designer B", 88, "Linear")]
+    label, tg, _ = run(msg("jobs"), notion)
+    assert label == "jobs"
+    text, buttons = tg.sent[0]
+    assert text.index("Designer B") < text.index("Designer A") and "88" in text and "Linear" in text
+    assert buttons[0] == [("✅ Apply 1", f"apply:{JID}"), ("ℹ️ More 1", f"more:{JID}")]
+    want = handle.alert_threshold()  # the Matcher's strong-match score from settings.yaml
+    assert f"'greater_than_or_equal_to': {want}" in str(notion.last_jobs_filter)
+
+
+def test_jobs_with_a_number_uses_that_score_and_works_mid_session():
+    notion = FakeNotion(live={"id": "job-live"})
+    label, tg, _ = run(msg("Jobs 55"), notion)
+    assert label == "jobs-none" and notion.created == []  # not sent to the Writer's inbox
+    assert "55" in tg.sent[0][0] and "jobs 35" in tg.sent[0][0]

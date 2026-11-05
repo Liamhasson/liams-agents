@@ -7,7 +7,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from agents.matcher.score import (route, is_hard_drop, assess_ghost, freshness, adjust, age_points,
+from agents.matcher.score import (route, is_hard_drop, avoided_industry, assess_ghost, freshness, adjust, age_points,
                                   onsite_outside_berlin, written_in_german)
 from shared.notion.client import _long_rt
 
@@ -195,6 +195,25 @@ def test_long_description_pieces_fit_notion_even_with_emoji():
     assert all(sum(2 if ord(c) > 0xFFFF else 1 for c in p) <= 2000 for p in pieces)
     assert "".join(pieces) == text[:6000]
 
+
+
+CRYPTO = {"crypto": {"min_mentions": 3, "words": ["crypto", "web3", "web 3", "blockchain", "defi", "nft"]}}
+
+
+def test_crypto_in_title_or_company_is_avoided():
+    assert avoided_industry("Senior Product Designer, Web3", "bitpanda", "", CRYPTO) == "crypto"
+    assert avoided_industry("Product Designer", "Acme Blockchain", "", CRYPTO) == "crypto"
+
+
+def test_crypto_heavy_description_is_avoided_but_one_mention_is_fine():
+    heavy = "We build crypto wallets. Trade crypto and DeFi. NFT drops weekly."
+    assert avoided_industry("Product Designer", "Acme", heavy, CRYPTO) == "crypto"
+    fintech = "A payments app for SMEs. Card spend, invoicing, and soon crypto."
+    assert avoided_industry("Product Designer", "N26", fintech, CRYPTO) == ""
+
+
+def test_whole_words_only():
+    assert avoided_industry("Designer, Cryptography tools", "Acme", "cryptographic cryptography", CRYPTO) == ""
 
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]

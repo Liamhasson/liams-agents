@@ -39,8 +39,17 @@ from .mytone import append_rule
 DONE_WORDS = {"done", "finalize", "finalise", "finish", "ready", "that's it",
               "looks good", "make the pdf", "make pdf", "ship it"}
 APPROVE_WORDS = {"approve", "approved", "i approve", "approve it", "looks good", "perfect"}
+DROP_WORDS = {"drop", "drop this", "drop it", "drop this job", "drop the job", "cancel",
+              "cancel this", "stop this", "stop writing", "not interested", "skip this", "skip this job"}
+DROP_STARTS = ("drop this", "drop it", "drop the job", "cancel this", "skip this job")
 OUTPUT_DIR = Path(__file__).resolve().parent.parent.parent / "output"
 POLL_SECONDS = 3
+
+
+def wants_drop(low: str) -> bool:
+    """'drop', 'drop this. I don't want crypto', 'cancel this'... but not 'stop using dashes'."""
+    low = low.strip().rstrip(".!")
+    return low in DROP_WORDS or low.startswith(DROP_STARTS)
 
 
 class Inbox:
@@ -240,6 +249,12 @@ def _converse(notion, tg, chat, claude, ctx, job, inbox, minutes) -> dict:
                 append_rule(notion, text.split(":", 1)[1].strip())
                 tg.send_message(chat, "Saved to your voice guide ✅")
                 continue
+            if wants_drop(low):
+                notion.update_page(job["id"], {"Status": {"select": {"name": "Skipped"}}})
+                tg.send_message(chat, f"Dropped ✅ <b>{html.escape(ctx.title)}</b> at {html.escape(ctx.company)} "
+                                      "is marked Skipped and this write-up has ended.")
+                usage.log_run(notion, claude, "writer")
+                return {"drafted": 0, "dropped": True}
             if phase == "writing":
                 if low in DONE_WORDS:
                     first = _finalize(claude, notion, tg, chat, ctx, job["id"], history)

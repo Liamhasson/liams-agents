@@ -148,8 +148,8 @@ def process_job(
     send_notification(
         pkg=pkg,
         filter_reason=filter_result["reason"],
-        recipient=config["notification"]["recipient_email"],
-        sender=config["notification"]["sender_email"],
+        recipient=os.environ.get("NOTIFY_EMAIL", ""),
+        sender=os.environ.get("NOTIFY_EMAIL", ""),
     )
     print(f"  ✓ Done: {job.title} @ {job.company}")
 

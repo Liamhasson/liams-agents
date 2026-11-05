@@ -214,8 +214,8 @@ if __name__ == "__main__":
         cover_letter_pdf_path="/tmp/test_cl.pdf",
     )
 
-    recipient = os.environ.get("RECIPIENT_EMAIL", "liamhasson@gmail.com")
-    sender = os.environ.get("SENDER_EMAIL", "liamhasson@gmail.com")
+    recipient = os.environ.get("NOTIFY_EMAIL", "")
+    sender = os.environ.get("NOTIFY_EMAIL", "")
 
     print("[gmail] Sending test email...")
     send_notification(test_pkg, "This is a test — no real job match.", recipient, sender)

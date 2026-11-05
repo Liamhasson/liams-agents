@@ -23,7 +23,7 @@ from shared.notion import NotionClient
 from shared.notion.client import plain_title, plain_text, plain_select, plain_date
 from shared.notion.schema import ROLE_TYPES
 from .profile import load_profile
-from .score import (score, route, is_hard_drop, assess_ghost, freshness, adjust, age_points,
+from .score import (score, route, is_hard_drop, avoided_industry, assess_ghost, freshness, adjust, age_points,
                     onsite_outside_berlin, written_in_german)
 
 _CONFIG = Path(__file__).resolve().parent.parent.parent / "config" / "settings.yaml"
@@ -85,8 +85,11 @@ def run(limit: int | None = None, rescore: bool = False, dry_run: bool = False,
         ghost_risk, ghost_reason = "low", ""
         fit, breakdown = None, []
         # Deterministic hard drops — each saves a Claude call.
+        avoided = avoided_industry(title, company, desc, cfg.get("avoid_industries", {}))
         if is_hard_drop(title, desc, hard_drops):
             reason = "working-student role"
+        elif avoided:
+            reason = f"{avoided} (Liam doesn't work in this industry)"
         elif written_in_german(desc):
             reason = "posting is in German"
         elif onsite_outside_berlin(location, remote):
