@@ -181,6 +181,14 @@ class NotionClient:
         """Add any schema properties not yet on an existing database (migration)."""
         current = self._request("GET", f"/databases/{db_id}").get("properties", {})
         missing = {k: v for k, v in schema.items() if k not in current}
+        # Notion creates a select option when a page uses it, but refuses to filter on one that doesn't exist yet.
+        for name, spec in schema.items():
+            if name in current and "select" in spec and current[name].get("type") == "select":
+                have = current[name]["select"]["options"]
+                known = {o["name"] for o in have}
+                new = [o for o in spec["select"]["options"] if o["name"] not in known]
+                if new:
+                    missing[name] = {"select": {"options": have + new}}
         if missing:
             self._request("PATCH", f"/databases/{db_id}", {"properties": missing})
 

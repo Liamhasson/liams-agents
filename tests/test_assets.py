@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from shared import assets as store
 from shared.assets import Asset, Planned, create_assets, find, is_complete, load_assets, save_text, set_state
+from shared.notion import NotionClient
 from shared.notion.schema import DATABASES, INBOX_SCHEMA, JOB_STATUSES, JOBS_SCHEMA
 
 
@@ -128,3 +129,46 @@ def test_schema_has_new_fields():
               "Brief message id", "Skip reason"):
         assert p in JOBS_SCHEMA
     assert "Briefed" in JOB_STATUSES and "Direction" in INBOX_SCHEMA and "Assets" in DATABASES
+
+
+class _Client(NotionClient):
+    def __init__(self, current):
+        self.current, self.patches = current, []
+
+    def _request(self, method, path, payload=None):
+        if method == "GET":
+            return {"properties": self.current}
+        self.patches.append(payload["properties"])
+        return {}
+
+
+def _select(*names):
+    return {"type": "select", "select": {"options": [{"id": n, "name": n, "color": "gray"} for n in names]}}
+
+
+SCHEMA = {"Status": {"select": {"options": [{"name": "New"}, {"name": "Briefed"}]}}}
+
+
+def test_new_select_options_are_added_because_notion_rejects_filters_on_unknown_ones():
+    c = _Client({"Status": _select("New", "Old")})
+    c._add_missing_properties("db", SCHEMA)
+    names = [o["name"] for o in c.patches[0]["Status"]["select"]["options"]]
+    assert names == ["New", "Old", "Briefed"]
+
+
+def test_existing_options_keep_their_ids():
+    c = _Client({"Status": _select("New")})
+    c._add_missing_properties("db", SCHEMA)
+    assert c.patches[0]["Status"]["select"]["options"][0]["id"] == "New"
+
+
+def test_nothing_is_sent_when_all_options_exist():
+    c = _Client({"Status": _select("New", "Briefed")})
+    c._add_missing_properties("db", SCHEMA)
+    assert c.patches == []
+
+
+def test_missing_properties_are_still_added():
+    c = _Client({})
+    c._add_missing_properties("db", SCHEMA)
+    assert c.patches == [SCHEMA]
