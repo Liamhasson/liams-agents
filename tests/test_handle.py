@@ -444,3 +444,22 @@ def test_restore_returns_a_dropped_job_to_briefed():
 
 def test_restore_only_touches_a_skipped_job():
     assert run(tap(f"restore:{JID}"), FakeNotion(page=_ready(status="Applied")))[0] == "already"
+
+
+def test_applied_sets_status_date_and_manual_method():
+    notion = FakeNotion(page=_ready(status="Ready to send"))
+    label, tg, _ = run(tap(f"applied:{JID}"), notion)
+    props = notion.updates[-1]
+    assert label == "applied" and props["Status"] == {"select": {"name": "Applied"}}
+    assert props["Apply method"] == {"select": {"name": "manual"}} and props["Applied at"]["date"]["start"]
+    assert "Good luck" in tg.sent[-1][0]
+
+
+def test_applied_works_without_a_session():
+    notion = FakeNotion(page=_ready(status="Drafting"), live=None)
+    assert run(tap(f"applied:{JID}"), notion)[0] == "applied" and notion.editor_started == []
+
+
+def test_applied_twice_is_harmless():
+    notion = FakeNotion(page=_ready(status="Applied"))
+    assert run(tap(f"applied:{JID}"), notion)[0] == "already" and notion.updates == []

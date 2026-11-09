@@ -1,8 +1,9 @@
 # CLAUDE.md — how to work in this repo
 
 This repo is **Liam's agents**: a small team of agents that finds design jobs and
-freelance work in Berlin and remote, tells Liam on WhatsApp the moment something fits,
-helps him write the application in his own voice, and applies once he approves.
+freelance work in Berlin and remote, tells Liam on Telegram the moment something fits,
+briefs him on what the company wants (the Director), and drafts everything the post asks
+for in his voice (the Editor). Liam reviews every asset and applies himself.
 
 **The full plan lives in [`docs/BUILD_BRIEF.md`](docs/BUILD_BRIEF.md). Read it before writing any code.**
 It is the source of truth for the goal, the team of agents, the architecture, the data
@@ -18,7 +19,7 @@ the plan, then build. Ask before guessing.
 ## Ground rules (not up for negotiation)
 
 1. **Nothing is sent without Liam's approval.** No application, email or pitch leaves
-   without an explicit yes on WhatsApp.
+   without an explicit yes from Liam. Applications are sent by Liam himself.
 2. **No logged-in LinkedIn automation, ever.** It risks a ban on his real account.
 3. **Never bypass CAPTCHAs, bot checks or logins.** If a site needs one, hand the step to Liam.
 4. **Respect sites.** Honest User-Agent, ~1 request/second per host, follow robots.txt and
@@ -42,9 +43,9 @@ liams-agents/
 ├── CLAUDE.md                 # this file
 ├── docs/BUILD_BRIEF.md       # the plan
 ├── agents/                   # scout, hunter (+ sources/), matcher, messenger,
-│                             # researcher, writer, applier, freelance_hunter
+│                             # researcher, director, editor, freelance_hunter
 ├── shared/                   # notion client, claude client, models, config, rate-limited http
-├── webhook/                  # Vercel function for WhatsApp
+├── webhook/                  # Vercel function for Telegram
 ├── config/settings.yaml      # search terms, filters, thresholds (nothing personal)
 ├── tests/
 └── .github/workflows/        # hunter.yml (hourly), daily.yml, scout.yml (weekly), dispatch.yml
@@ -68,9 +69,10 @@ python orchestrator.py                        # live run
 - Local secrets live in `.env` (gitignored, never committed). See `.env.example` for keys.
 - The daily GitHub Action (`.github/workflows/job_agent.yml`) runs on `ubuntu-24.04`.
 - **Telegram taps and messages go to a webhook**, `api/telegram.py` on Vercel, so they're answered
-  instantly. The logic lives in `agents/messenger/handle.py`. Apply starts `writer.yml` with
-  `GITHUB_DISPATCH_TOKEN`. During a Writer session, Liam's messages are saved to the Notion
-  "Inbox" database and the Writer reads them from there. Telegram allows only one receiver, so
+  instantly. The logic lives in `agents/messenger/handle.py`. Brief me starts `director.yml` with
+  `GITHUB_DISPATCH_TOKEN`. Any text to the bot starts `editor.yml` for the job waiting on him, and
+  during an Editor session his messages are saved to the Notion "Inbox" database and the Editor
+  reads them from there. The chat closes after 15 quiet minutes and resumes with everything saved. Telegram allows only one receiver, so
   never call `getUpdates` while the webhook is set. `scripts/set_telegram_webhook.py` turns the
   webhook on or off (`--status` to check). `poll.py` is the manual backup for when it's off.
   Don't put Telegram on a GitHub cron again: GitHub ran the 5-minute schedule 3–4 times a day.
@@ -90,8 +92,8 @@ stop and tell Liam — removing it from history needs a force-push and his expli
 
 ## Models & cost
 
-- Haiku: scoring, parsing WhatsApp replies, cheap classification.
-- Sonnet: research and writing, only after Liam approves a job.
+- Haiku: scoring, reading what a post asks for, cheap classification.
+- Sonnet: research, the Director's brief and the Editor, only after Liam taps Brief me.
 - Claude runs on Liam's Claude subscription through the Claude Code CLI (`shared/claude.py`,
   `CLAUDE_CODE_OAUTH_TOKEN` on GitHub), so the agents cost nothing extra. Don't add
   `ANTHROPIC_API_KEY` to workflows: it would bill the API.

@@ -75,7 +75,7 @@ JOBS_SCHEMA: dict = {
     "Last reminder at": {"date": {}},
     "Reminder count": {"number": {"format": "number"}},
     "Telegram message id": {"number": {"format": "number"}},
-    # While a live Writer session runs, Liam's typed messages go to the Inbox
+    # While a live Editor session runs, Liam's typed messages go to the Inbox
     # until this time. A date (not just the status) so a crashed session expires.
     "Session until": {"date": {}},
     "Research notes": {"rich_text": {}},
@@ -150,8 +150,8 @@ USAGE_SCHEMA: dict = {
     "API-equivalent $": {"number": {"format": "dollar"}},
 }
 
-# Lines Liam rejected, so the Writer never writes them again. Lives under Private
-# (not the root page), and an entry is only added after Liam confirms it.
+# Lines Liam rejected, so the Editor never writes them again. Lives under Private
+# (not the root page), and an entry is only added when Liam says never to use a line.
 NEVER_AGAIN_SCHEMA: dict = {
     "Line": {"title": {}},
     "Reason": {"rich_text": {}},
@@ -160,8 +160,8 @@ NEVER_AGAIN_SCHEMA: dict = {
     "Application": {"rich_text": {}},
 }
 
-# Liam's typed Telegram messages during a live Writer session. The webhook owns
-# the Telegram stream, so it drops them here and the Writer reads them.
+# Liam's typed Telegram messages during a live Editor session. The webhook owns
+# the Telegram stream, so it drops them here and the Editor reads them.
 INBOX_SCHEMA: dict = {
     "Text": {"title": {}},          # a short preview
     "Full text": {"rich_text": {}},  # the whole message, in several pieces

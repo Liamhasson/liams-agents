@@ -38,6 +38,17 @@ def _days_since(iso: str, now: datetime) -> float:
         return 0.0
 
 
+def reminder_text(live: list[dict]) -> str:
+    lines = [f"⏰ <b>{len(live)} job(s) still waiting on you</b> (oldest first):", ""]
+    for p in live:
+        props = p["properties"]
+        fit, score = props.get("Fit score", {}).get("number"), props.get("Score", {}).get("number")
+        rating = f" (Fit {fit})" if fit is not None else (f" ({score})" if score is not None else "")
+        lines.append(f"• {plain_title(p)[:48]} @ {plain_text(p,'Company')[:22]}{rating}")
+    lines.append("\nReply to a job's message, or text me to start on a brief.")
+    return "\n".join(lines)
+
+
 def run(dry_run: bool = False) -> dict:
     cfg = _cfg()
     expiry_days = float(cfg.get("expiry_days", 3))
@@ -74,13 +85,7 @@ def run(dry_run: bool = False) -> dict:
         print("Nothing awaiting Liam — no reminder sent.")
         return {"reminded": 0, "expired": len(expired)}
 
-    lines = [f"⏰ <b>{len(live)} job(s) still waiting on you</b> (oldest first):", ""]
-    for p in live:
-        score = p["properties"].get("Score", {}).get("number")
-        lines.append(f"• {plain_title(p)[:48]} @ {plain_text(p,'Company')[:22]}"
-                     + (f" ({score}/100)" if score is not None else ""))
-    lines.append("\nOpen Notion to Apply/Skip, or reply to each job's message.")
-    text = "\n".join(lines)
+    text = reminder_text(live)
 
     if dry_run:
         print(text)

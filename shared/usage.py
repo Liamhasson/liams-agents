@@ -57,7 +57,7 @@ def warning_text(kind: str, total: float, limit: float) -> str:
     if kind == "limit":
         return (f"⛔ The agents reached this month's usage limit (${total:.2f} of ${limit:.0f} "
                 "API-equivalent). Matching and research are paused until next month. The Hunter "
-                "keeps collecting jobs, and the Writer still works when you start it. To raise the "
+                "keeps collecting jobs, and the Editor still works when you text it. To raise the "
                 "limit, change usage › monthly_limit_usd in config/settings.yaml.")
     return (f"⚠️ The agents have used {total / limit:.0%} of this month's limit "
             f"(${total:.2f} of ${limit:.0f} API-equivalent).")

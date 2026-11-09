@@ -160,3 +160,15 @@ if __name__ == "__main__":
         fn()
         print(f"  ✓ {fn.__name__}")
     print(f"\n{len(fns)} messenger tests passed.")
+
+
+def test_reminder_includes_briefed_jobs():
+    import yaml
+    settings = yaml.safe_load((Path(__file__).resolve().parent.parent / "config" / "settings.yaml").read_text())
+    assert "Briefed" in settings["messenger"]["awaiting_statuses"]
+
+
+def test_reminder_says_to_text_and_shows_fit():
+    from agents.messenger.reminders import reminder_text
+    text = reminder_text([_page(score=118, fit=72)])
+    assert "Fit 72" in text and "/100" not in text and "text me" in text

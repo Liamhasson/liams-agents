@@ -1,4 +1,4 @@
-"""Load everything the Writer needs from Notion before drafting.
+"""Load everything the Editor needs from Notion before drafting.
 
 Facts come ONLY from Liam's mytone + base CV (both in Notion Private) and the
 job's research notes — never invented.

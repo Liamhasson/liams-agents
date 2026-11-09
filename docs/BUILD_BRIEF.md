@@ -1,6 +1,6 @@
 # Liam's agents: build brief
 
-This is the plan for rebuilding Job_Agent into **Liam's agents**, a small team of agents that finds design jobs and freelance work in Berlin and remote, tells Liam on WhatsApp the moment something fits, helps him write the application with him on WhatsApp, and applies once he approves.
+This is the plan for rebuilding Job_Agent into **Liam's agents**, a small team of agents that finds design jobs and freelance work in Berlin and remote, tells Liam on Telegram the moment something fits, briefs him on what the company wants, and drafts everything the post asks for in his voice. Liam reviews every asset and applies himself.
 
 Read this whole file before writing any code. Build in the phases at the bottom, one at a time, and check in with Liam at the end of each phase.
 
@@ -23,8 +23,8 @@ Read this whole file before writing any code. Build in the phases at the bottom,
 What success looks like:
 1. A new design job appears on a Berlin startup's career page.
 2. Within about an hour Liam gets a WhatsApp message explaining the job, the problem the company is hiring to solve, why he's a fit and any gaps.
-3. He taps Apply or Skip. If he applies, he brainstorms the CV and cover letter with the Writer on WhatsApp.
-4. He approves the final version, and the Applier submits it or hands him a ready-to-submit pack when it can't.
+3. He taps Brief me or Skip. The Director tells him what the company is after, who they want and why he fits, and lists what the post asks applicants to send.
+4. He texts when he's ready. The Editor drafts each asset with him, he reviews them and applies himself.
 5. Everything is tracked in Notion, including which sources lead to callbacks.
 
 ---
@@ -53,8 +53,8 @@ These are not up for negotiation in code.
 | **Matcher** | Scores each job, applies filters, writes the fit summary and flags gaps. Sends borderline ones to Liam as a question. | After each Hunter run | Haiku |
 | **Messenger** | Owns WhatsApp: job alerts, Liam's replies, daily reminders for unanswered jobs, weekly stats. | On events + daily | Haiku for parsing replies |
 | **Researcher** | Researches the company after Liam approves a job: product, mission, team, recent news, the problem behind the hire. | On approval | Sonnet |
-| **Writer** | Brainstorms and drafts the CV and cover letter with Liam on WhatsApp, in his voice from mytone.md. Saves every version to Notion and makes the final PDFs. | On approval | Sonnet |
-| **Applier** | Submits approved applications by email or through simple hiring forms, or sends Liam a ready-to-submit pack. | On final approval | none or Haiku |
+| **Director** | Runs once after Brief me. Short brief: what they're after, who they want, why Liam fits (each point quotes his CV or mytone), weak spots, and which assets the post needs. Never writes assets. | On Brief me | Sonnet |
+| **Editor** | Drafts every asset the post asks for (CV, cover letter, form answers, Loom script) and changes them with Liam in plain language on Telegram. Starts when he texts. Saves his corrections to mytone silently. | When Liam texts | Sonnet |
 | **Freelance Hunter** | Finds freelance leads and small Berlin businesses that need a website, and drafts pitches for Liam to send himself. | Daily | Haiku, Sonnet for pitches |
 
 Each agent is its own module with a clear input and output, so new agents can join later without touching the others.
@@ -68,14 +68,14 @@ Each agent is its own module with a clear input and output, so new agents can jo
  hourly ──▶ │ Hunter ──▶ Matcher ──▶ Messenger.send_alert                                  │
  weekly ──▶ │ Scout                                                                         │
  daily  ──▶ │ Messenger.reminders  ·  Freelance Hunter  ·  weekly stats                     │
- dispatch ▶ │ Researcher ▶ Writer (first draft)  ·  Applier                                 │
+ dispatch ▶ │ Researcher ▶ Director  ·  Editor (when Liam texts)                                 │
             └───────────────────────────────────────────────────────────────────────────────┘
                      │ reads/writes                                ▲ repository_dispatch
                      ▼                                             │
               ┌──────────────┐        ┌─────────────────────────────────────┐
               │    Notion    │◀──────▶│  Vercel function: /api/whatsapp      │◀── WhatsApp
               │ Jobs, Leads, │        │  receives Liam's replies, updates    │    Cloud API
-              │ Sources,     │        │  Notion, runs quick Writer chat      │    (Meta)
+              │ Sources,     │        │  Notion, starts the Editor             │    (Meta)
               │ Companies    │        │  turns, triggers GitHub for slow work│──▶ messages
               └──────────────┘        └─────────────────────────────────────┘     to Liam
 ```
@@ -108,8 +108,8 @@ liams-agents/
 │   ├── matcher/
 │   ├── messenger/
 │   ├── researcher/
-│   ├── writer/
-│   ├── applier/
+│   ├── director/
+│   ├── editor/
 │   └── freelance_hunter/
 ├── shared/                   # notion client, claude client, models, config, logging, http with rate limits
 ├── webhook/                  # Vercel function for WhatsApp
@@ -260,33 +260,21 @@ Gaps: asks for 5+ years
 
 ---
 
-## 11. Researcher and Writer
+## 11. Researcher, Director and Editor
 
-Only run after Liam taps Apply. Nothing is drafted before that.
+Only run after Liam taps Brief me. The full design is in `docs/superpowers/specs/2026-11-09-director-editor-design.md`.
 
-**Researcher:** reads the job post, the company site, recent news and the team page. Writes short notes to Notion: what they do, the problem behind the hire, their values and language, and the people involved if public.
+**Researcher:** reads the job post, the careers page and the company's own website, following robots.txt. Writes facts about the company to Notion.
 
-**Writer:**
-- Loads mytone.md and the base CV from the Notion Private page.
-- Opens a WhatsApp chat with Liam: the hook idea and the one or two stories it would lead with, then asks what he thinks. Short messages, two options when there's a real choice, and it quotes the exact line it wants to change.
-- Saves every version to the job's Notion page.
-- When Liam says it's done, makes the final PDFs (one-page CV and cover letter) and sends them on WhatsApp for a last look.
-- When Liam edits a draft, asks if the change should be added to mytone.md, and updates the Notion copy if he says yes.
-- Some jobs don't need a cover letter. Ask Liam instead of always writing one.
+**Director:** runs once and needs no live chat. Sends a short brief that keeps what the post says apart from its own read. Every "why you" point quotes Liam's CV or mytone, and code drops any point whose quote isn't there. It lists the assets the post asks for and asks where to start. The brief sets the angle and is never a source of facts.
 
-Keep the existing PDF generator (Playwright renders HTML to PDF) if it still works well. One page is a hard limit, so check it.
+**Editor:** starts when Liam texts, and closes after 15 quiet minutes with everything saved in Notion. Drafts only what the post asks for, unless he asks for more. He can skip one asset without dropping the application. Each draft goes through the fact check and voice check. His corrections go to mytone silently, in his own words only. One page is a hard limit for the CV.
 
 ---
 
-## 12. The Applier
+## 12. Applying
 
-Runs after Liam's final yes. Pick the method per job:
-
-1. **Email application:** send from Liam's main Gmail with the PDFs attached.
-2. **Simple hiring forms** (Ashby, Greenhouse, Lever, Personio, Workable, JOIN and similar): fill with Playwright using the standard answers from Notion, upload the PDFs, take a screenshot before submitting and after, then submit. Send Liam the confirmation screenshot.
-3. **Everything else** (LinkedIn, Workday, any login, any CAPTCHA or bot check, unusual custom questions): send Liam a "ready to submit" message with the apply link and copy-paste answers for every field. Status becomes Needs Liam to submit, and he replies "done" after.
-
-If a form has a question the standard answers don't cover, ask Liam on WhatsApp before submitting. Log the method, time and result in Notion.
+Liam applies himself and reviews every asset first. When every asset is final or skipped, the Editor sends a checklist with the posting link and an Applied button, which sets the status and date in Notion. There is no Applier agent.
 
 ---
 
@@ -356,13 +344,13 @@ Each phase ends with tests, a short demo for Liam and his OK before moving on.
 - Meta setup with Liam. Vercel webhook with signature checks. Alerts, buttons, reply handling, borderline questions, daily reminders and expiry.
 - **Done when:** a real job reaches Liam's WhatsApp, and Apply or Skip updates Notion.
 
-### Phase 5: Researcher and Writer
+### Phase 5: Researcher, Director and Editor
 - Research notes. The WhatsApp brainstorm loop. Drafts saved to Notion. One-page PDFs. mytone.md updates from Liam's edits.
 - **Done when:** Liam co-writes one real application end to end on WhatsApp and says it sounds like him.
 
-### Phase 6: Applier
-- Email, simple hiring forms, and the ready-to-submit fallback. Screenshots and logging.
-- **Done when:** one real application is submitted by email or form after Liam's yes, and one goes through the fallback.
+### Phase 6: removed
+
+There is no Applier. Liam applies himself.
 
 ### Phase 7: Scout
 - Weekly discovery of companies and sources, with Liam's OK for HTML-only sources.
@@ -380,7 +368,7 @@ Each phase ends with tests, a short demo for Liam and his OK before moving on.
 ## 17. Things still to verify while building
 
 - Meta: test number limits, template rules and current utility template price in Germany.
-- Vercel free plan function duration, for Writer chat turns.
+- Vercel free plan function duration, for webhook replies.
 - Personio, SmartRecruiters and JOIN terms for automated reading.
 - The Bundesagentur header and response format.
 - Getro's internal search request for pages past the first.

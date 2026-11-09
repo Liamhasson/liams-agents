@@ -9,7 +9,7 @@ Always one A4 page: content that overflows is scaled down to fit.
 Fonts: Carlito loads from Google Fonts, falling back to Lato/Calibri/Arial so it
 still renders on macOS (local) and Ubuntu (GitHub Actions) without it.
 
-CV markdown format (what the Writer produces):
+CV markdown format (what the Editor produces):
 
     # Liam Hasson
     Product Designer

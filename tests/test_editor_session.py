@@ -269,3 +269,13 @@ def test_actions_receive_the_message(go):
     go([["make it short"]], turn=lambda h: {"reply": "ok", "actions": [{"type": "x"}]},
        actions=lambda e, a, m: (got.append((a, m)), Done())[1])
     assert got == [([{"type": "x"}], "make it short")]
+
+
+def test_checklist_lists_finals_skips_and_link():
+    ctx = _ctx()
+    env = session.Env(notion=None, tg=None, chat="42", claude=None, ctx=ctx, ids={}, assets=[
+        Asset("a", JOB, "cv", "final", "CV", "", "x", "x"), Asset("b", JOB, "cover_letter", "skipped", "Cover letter", "", "", ""),
+        Asset("c", JOB, "portfolio", "needed", "Portfolio link", "", "", "")])
+    text, _ = session.checklist(env)
+    assert "CV: Ready" in text and "Cover letter: Skipped" in text and "Portfolio link: Yours to handle" in text
+    assert "https://acme.com/1" in text

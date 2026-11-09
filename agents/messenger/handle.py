@@ -139,7 +139,7 @@ class Handler:
 
     # ---- shared lookups ---------------------------------------------------
     def live_session_job(self) -> Optional[dict]:
-        """The job a live Writer session is working on, if one is running now."""
+        """The job a live Editor session is working on, if one is running now."""
         rows = self.notion.query_database(self.jobs_db, {
             "property": "Session until", "date": {"on_or_after": now_iso()}})
         return rows[0] if rows else None
@@ -228,6 +228,8 @@ class Handler:
             return self._skip_asset(page, arg)
         if action == "pick":
             return self._pick(page)
+        if action == "applied":
+            return self._applied(page)
         if action == "restore":
             return self._restore(page)
         return "ignored"
@@ -309,6 +311,17 @@ class Handler:
         self.tg.send_message(self.chat, f"Skipped the {html.escape(LABELS.get(kind, kind))}. The rest of this application stays open.")
         return "asset-skipped"
 
+    def _applied(self, page: dict) -> str:
+        title = plain_title(page)
+        if plain_select(page, "Status") in ("Applied", "Interview", "Offer", "Rejected"):
+            self.tg.send_message(self.chat, f"<b>{html.escape(title)}</b> is already marked as applied.")
+            return "already"
+        self.notion.update_page(page["id"], {"Status": {"select": {"name": "Applied"}},
+                                             "Applied at": {"date": {"start": now_iso()}},
+                                             "Apply method": {"select": {"name": "manual"}}})
+        self.tg.send_message(self.chat, f"Marked <b>{html.escape(title)}</b> as applied. Good luck.")
+        return "applied"
+
     def _restore(self, page: dict) -> str:
         title = plain_title(page)
         if plain_select(page, "Status") != "Skipped":
@@ -332,7 +345,7 @@ class Handler:
         raw = (msg.get("text") or "").strip()
         text = raw.lower()
         jobs_cmd = JOBS_COMMAND.match(text)
-        if jobs_cmd:  # answered here, even mid-session: the Writer can't see other jobs
+        if jobs_cmd:  # answered here, even mid-session: the Editor can't see other jobs
             return self._list_jobs(int(jobs_cmd.group(1)) if jobs_cmd.group(1) else alert_threshold())
         # A reply to a job card is a decision on that job, even mid-session.
         card = self._card_replied_to(msg)

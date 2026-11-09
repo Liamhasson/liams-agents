@@ -92,7 +92,7 @@ class Claude:
 
     def chat(self, system: str, messages: list[dict], max_tokens: int = 800,
              temperature: Optional[float] = None) -> str:
-        """Free-text turn (for the Writer's conversation)."""
+        """Free-text turn."""
         if self.backend != "api":
             return str(self._cli(system, _transcript(messages)).get("result", "")).strip()
         kwargs = {} if temperature is None else {"temperature": temperature}
