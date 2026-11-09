@@ -57,10 +57,11 @@ def _rt(s: str) -> dict:
 
 # Notion caps each text piece at 2,000 characters, so long text goes in as several pieces.
 _MAX_DESCRIPTION = 6000  # what the Matcher reads
+_MAX_ASSET = 40000  # a CV, letter, form answers or Loom script. Stays under 25 pieces.
 
 
-def _long_rt(s: str) -> dict:
-    s = (s or "")[:_MAX_DESCRIPTION]
+def _long_rt(s: str, limit: int = _MAX_DESCRIPTION) -> dict:
+    s = (s or "")[:limit]
     return {"rich_text": [{"type": "text", "text": {"content": p}} for p in _pieces(s)]}
 
 

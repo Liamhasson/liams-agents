@@ -91,6 +91,7 @@ hunter:
 matcher:
   alert_threshold: 60        # >= this -> alert-worthy (tuned down with Liam from 70)
   ask_threshold: 40          # this..alert-1 -> borderline, ask Liam
+  min_fit: 50                # Claude's fit below this is never sent, whatever the bonuses
   # Bonuses (Berlin, role, field, a new post) only go to jobs that already fit:
   # Claude's fit score must be at least bonus_min_fit. Penalties always apply.
   bonus_min_fit: 40

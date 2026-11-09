@@ -29,7 +29,7 @@ ROLE_TYPES = [
 ]
 
 JOB_STATUSES = [
-    "New", "Asked Liam", "Waiting for Liam", "Approved", "Drafting",
+    "New", "Asked Liam", "Waiting for Liam", "Approved", "Briefed", "Drafting",
     "Ready to send", "Applied", "Needs Liam to submit", "Interview", "Offer",
     "Rejected", "Skipped", "Expired",
 ]
@@ -79,6 +79,14 @@ JOBS_SCHEMA: dict = {
     # until this time. A date (not just the status) so a crashed session expires.
     "Session until": {"date": {}},
     "Research notes": {"rich_text": {}},
+    # What the post asks applicants to send, as JSON, each item with the post's words.
+    "Application asks": {"rich_text": {}},
+    "Ad work": {"rich_text": {}},  # the post's words, when ad work is part of the role
+    "Base score": {"number": {"format": "number"}},  # Score without the points for post age
+    "Director brief": {"rich_text": {}},
+    "Form questions": {"rich_text": {}},  # JSON, only where the hiring tool publishes them
+    "Brief message id": {"number": {"format": "number"}},
+    "Skip reason": _select("too senior", "wrong field", "ad work", "location", "other"),
     "CV draft": {"rich_text": {}},
     "Cover letter draft": {"rich_text": {}},
     "Lines changed": {"number": {"format": "number"}},  # Liam's edits to the first draft
@@ -133,7 +141,7 @@ COMPANIES_SCHEMA: dict = {
 USAGE_SCHEMA: dict = {
     "Run": {"title": {}},
     "Date": {"date": {}},
-    "Agent": _select("matcher", "researcher", "writer"),
+    "Agent": _select("matcher", "researcher", "writer", "director", "editor"),
     "Backend": _select("subscription", "api"),
     "Model": {"rich_text": {}},
     "Calls": {"number": {"format": "number"}},
@@ -161,6 +169,21 @@ INBOX_SCHEMA: dict = {
     "Received at": {"date": {}},
     "Read": {"checkbox": {}},
     "Telegram update id": {"number": {"format": "number"}},
+    "Direction": _select("in", "out"),  # out = the Editor's replies, kept so a chat can resume
+}
+
+# One row per job and asset. The Director creates them and the Editor fills them.
+ASSETS_SCHEMA: dict = {
+    "Name": {"title": {}},
+    "Job": {"rich_text": {}},
+    "Kind": _select("cv", "cover_letter", "form_answers", "loom_script",
+                    "portfolio", "linkedin", "case_study", "other"),
+    "State": _select("needed", "optional", "drafted", "final", "skipped"),
+    "Label": {"rich_text": {}},
+    "Quote": {"rich_text": {}},  # the post's words that ask for this asset
+    "Text": {"rich_text": {}},
+    "First draft": {"rich_text": {}},
+    "Lines changed": {"number": {"format": "number"}},
 }
 
 # Order matters only for how they appear in the page.
@@ -171,4 +194,5 @@ DATABASES: dict[str, dict] = {
     "Companies": COMPANIES_SCHEMA,
     "Usage": USAGE_SCHEMA,
     "Inbox": INBOX_SCHEMA,
+    "Assets": ASSETS_SCHEMA,
 }
