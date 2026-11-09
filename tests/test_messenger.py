@@ -49,7 +49,7 @@ def test_job_card_has_apply_skip_buttons_with_job_id():
     flat = [b for row in buttons for b in row]
     labels = {label for label, data in flat}
     datas = {data for label, data in flat}
-    assert "✅ Brief me" in labels and "⏭ Skip" in labels
+    assert "✅ Go forward" in labels and "⏭ Skip" in labels
     assert f"apply:{jid}" in datas and f"skip:{jid}" in datas
     assert "Product Designer" in text and "Acme" in text
     assert "acme.com/jobs/1" in text          # url renders (was a bug: read as rich_text)
@@ -131,8 +131,8 @@ def test_card_shows_senior_label():
     assert "Senior title" not in job_card(_page())[0]
 
 
-def test_card_button_says_brief_me():
-    assert job_card(_page())[1][0][0][0] == "✅ Brief me"
+def test_card_button_says_go_forward():
+    assert job_card(_page())[1][0][0][0] == "✅ Go forward"
 
 
 def test_card_says_posted_days_ago():
@@ -162,13 +162,13 @@ if __name__ == "__main__":
     print(f"\n{len(fns)} messenger tests passed.")
 
 
-def test_reminder_includes_briefed_jobs():
+def test_reminders_only_cover_jobs_awaiting_a_decision():
     import yaml
     settings = yaml.safe_load((Path(__file__).resolve().parent.parent / "config" / "settings.yaml").read_text())
-    assert "Briefed" in settings["messenger"]["awaiting_statuses"]
+    assert settings["messenger"]["awaiting_statuses"] == ["Waiting for Liam", "Asked Liam"]
 
 
-def test_reminder_says_to_text_and_shows_fit():
+def test_reminder_says_to_decide_and_shows_fit():
     from agents.messenger.reminders import reminder_text
     text = reminder_text([_page(score=118, fit=72)])
-    assert "Fit 72" in text and "/100" not in text and "text me" in text
+    assert "Fit 72" in text and "/100" not in text and "Go forward" in text

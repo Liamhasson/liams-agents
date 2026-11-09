@@ -63,7 +63,7 @@ def _posted_days_ago(page: dict) -> str:
 
 
 def job_card(page: dict) -> tuple[str, list]:
-    """Full alert for a strong match: text + Brief me/Skip/More buttons."""
+    """Full alert for a strong match: text + Go forward/Skip/More buttons."""
     jid = job_id_for_callback(page)
     title = _esc(plain_title(page))
     company = _esc(plain_text(page, "Company"))
@@ -108,7 +108,7 @@ def job_card(page: dict) -> tuple[str, list]:
     text = "\n".join(lines)
 
     buttons = [
-        [("✅ Brief me", f"apply:{jid}"), ("⏭ Skip", f"skip:{jid}")],
+        [("✅ Go forward", f"apply:{jid}"), ("⏭ Skip", f"skip:{jid}")],
         [("ℹ️ Tell me more", f"more:{jid}")],
     ]
     return text, buttons
@@ -123,7 +123,7 @@ def ask_card(page: dict) -> tuple[str, list]:
     text = f"🤔 Borderline ({_rating(page)}): <b>{title}</b> at <b>{company}</b> — relevant to you?"
     if breakdown:
         text += f"\n<i>{breakdown}</i>"
-    buttons = [[("👍 Yes, brief me", f"yes:{jid}"), ("👎 No", f"no:{jid}")]]
+    buttons = [[("👍 Go forward", f"yes:{jid}"), ("👎 No", f"no:{jid}")]]
     return text, buttons
 
 

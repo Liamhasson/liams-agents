@@ -34,11 +34,22 @@ JOBS_SHOWN = 8
 READY_STATUSES = ("Briefed", "Drafting", "Ready to send")
 HELP_WORDS = {"/start", "/help", "help"}
 BOOT_MINUTES = 5  # the chat counts as live while GitHub starts it up, so a second text doesn't start another
+OFF_ACTIONS = {"start", "skipasset", "pick", "brief", "resume", "restore"}
 SKIP_REASONS = {"senior": "too senior", "field": "wrong field", "ad": "ad work",
                 "location": "location", "other": "other"}
 
 DEFAULT_REPO = "Liamhasson/liams-agents"
 _SETTINGS = os.path.join(os.path.dirname(__file__), "..", "..", "config", "settings.yaml")
+
+
+def editor_enabled() -> bool:
+    """Whether Brief me and the Editor chat are on (settings > messenger > editor_enabled)."""
+    try:
+        import yaml
+        with open(_SETTINGS) as fh:
+            return bool((yaml.safe_load(fh).get("messenger") or {}).get("editor_enabled", False))
+    except Exception:
+        return False
 
 
 def _matcher_setting(name: str, default: int) -> int:
@@ -53,6 +64,11 @@ def _matcher_setting(name: str, default: int) -> int:
 def alert_threshold() -> int:
     """The Matcher's 'strong match' score (settings > matcher > alert_threshold)."""
     return _matcher_setting("alert_threshold", 70)
+
+SIMPLE_HELP = ("Here's what I understand:\n"
+               "• Tap <b>Go forward</b>, <b>Skip</b> or <b>Tell me more</b> on a job. Your choice is saved in Notion.\n"
+               "• Or reply <b>apply</b>, <b>skip</b> or <b>more</b> to a job message.\n"
+               "• Send <b>jobs</b> to see your open matches (or <b>jobs 60</b> for a lower score).")
 
 HELP = ("Here's what I understand:\n"
         "• Tap <b>Brief me</b>, <b>Skip</b> or <b>Tell me more</b> on a job.\n"
@@ -112,11 +128,13 @@ class Handler:
     """Holds the clients for one update. The two start functions are injectable for tests."""
 
     def __init__(self, tg, notion, ids: dict, chat, start_director: Callable = start_director,
-                 start_editor: Callable = start_editor):
+                 start_editor: Callable = start_editor, editor_on: Optional[bool] = None):
         self.tg, self.notion, self.chat = tg, notion, chat
         self.jobs_db, self.inbox_db = ids["Jobs"], ids.get("Inbox")
         self.start_director, self.start_editor = start_director, start_editor
         self.ids = ids
+        self.editor_on = editor_enabled() if editor_on is None else editor_on
+        self.help_text = HELP if self.editor_on else SIMPLE_HELP
 
     # ---- entry point ------------------------------------------------------
     def handle(self, update: dict) -> str:
@@ -175,6 +193,9 @@ class Handler:
             self.tg.send_message(self.chat, f"<b>{html.escape(title)}</b> is already handled "
                                             f"({html.escape(plain_select(page, 'Status') or 'no status')}).")
             return "already"
+        if not self.editor_on:
+            self.tg.send_message(self.chat, f"✅ Going forward: <b>{html.escape(title)}</b>. Saved in Notion.")
+            return "approved"
         self.tg.send_message(self.chat, f"✅ Approved: <b>{html.escape(title)}</b>")
         return self._kick_director(page["id"], title)
 
@@ -212,6 +233,9 @@ class Handler:
             self._answer(qid, "Saved")
             return "why"
         self._answer(qid)  # stop the spinner first; the reply message follows
+        if not self.editor_on and action in OFF_ACTIONS:
+            self.tg.send_message(self.chat, "The Director and Editor are switched off, so this button no longer does anything.")
+            return "off"
         page = self.notion.get_page(uuid(jid))
         if action in ("apply", "yes"):
             return self._approve(page)
@@ -365,7 +389,7 @@ class Handler:
                 return self._skip(card)
             self.tg.send_message(self.chat, details_text(card))
             return "more"
-        live = self.live_session_job()
+        live = self.live_session_job() if self.editor_on else None
         if live:
             if not raw:
                 self.tg.send_message(self.chat, "I can only read text messages for now.")
@@ -378,9 +402,9 @@ class Handler:
             self._to_inbox(raw, live["id"], update_id)
             return "inbox"
         if text in HELP_WORDS:
-            self.tg.send_message(self.chat, "Hi Liam 👋 Matched design jobs arrive here.\n\n" + HELP)
+            self.tg.send_message(self.chat, "Hi Liam 👋 Matched design jobs arrive here.\n\n" + self.help_text)
             return "greeting"
-        if raw:
+        if raw and self.editor_on:
             started = self._text_to_editor(msg, card, raw, update_id)
             if started:
                 return started
@@ -388,7 +412,7 @@ class Handler:
             self.tg.send_message(self.chat, "Reply <b>apply</b>, <b>skip</b> or <b>more</b>, or use the buttons.")
             return "reply-help"
         if text in GREETINGS:
-            self.tg.send_message(self.chat, "Hi Liam 👋 Matched design jobs arrive here.\n\n" + HELP)
+            self.tg.send_message(self.chat, "Hi Liam 👋 Matched design jobs arrive here.\n\n" + self.help_text)
             return "greeting"
         return self._help()
 
@@ -416,7 +440,7 @@ class Handler:
             lines.append(f"{i}. <b>{rating}</b> · {html.escape(plain_title(p))}"
                          + (f" at {html.escape(company)}" if company else ""))
             jid = p["id"].replace("-", "")
-            buttons.append([(f"✅ Brief {i}", f"apply:{jid}"), (f"ℹ️ More {i}", f"more:{jid}")])
+            buttons.append([(f"✅ Go forward {i}", f"apply:{jid}"), (f"ℹ️ More {i}", f"more:{jid}")])
         self.tg.send_message(self.chat, "\n".join(lines), buttons)
         return "jobs"
 
@@ -429,8 +453,8 @@ class Handler:
         return matches[0] if matches else None
 
     def _help(self) -> str:
-        waiting = self.waiting_to_write()[:3]
-        text = "I didn't catch that, sorry. " + HELP
+        waiting = self.waiting_to_write()[:3] if self.editor_on else []
+        text = "I didn't catch that, sorry. " + self.help_text
         buttons = None
         if waiting:
             text += "\n\nThese are approved and waiting for a brief:"
@@ -453,5 +477,5 @@ class Handler:
 
 
 def handle_update(update: dict, tg, notion, ids: dict, chat, start_director: Callable = start_director,
-                  start_editor: Callable = start_editor) -> str:
-    return Handler(tg, notion, ids, chat, start_director, start_editor).handle(update)
+                  start_editor: Callable = start_editor, editor_on: Optional[bool] = None) -> str:
+    return Handler(tg, notion, ids, chat, start_director, start_editor, editor_on).handle(update)

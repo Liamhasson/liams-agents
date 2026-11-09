@@ -1,9 +1,10 @@
 # CLAUDE.md — how to work in this repo
 
 This repo is **Liam's agents**: a small team of agents that finds design jobs and
-freelance work in Berlin and remote, tells Liam on Telegram the moment something fits,
-briefs him on what the company wants (the Director), and drafts everything the post asks
-for in his voice (the Editor). Liam reviews every asset and applies himself.
+freelance work in Berlin and remote, and tells Liam on Telegram the moment something fits.
+He taps Go forward or Skip, the choice is saved in Notion, and he writes his applications
+himself in Claude. The Director and Editor are built but switched off
+(`messenger.editor_enabled` in `config/settings.yaml`). Don't assume they run.
 
 **The full plan lives in [`docs/BUILD_BRIEF.md`](docs/BUILD_BRIEF.md). Read it before writing any code.**
 It is the source of truth for the goal, the team of agents, the architecture, the data

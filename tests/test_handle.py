@@ -94,7 +94,7 @@ def msg(text, chat=CHAT, reply_to=None):
     return {"update_id": 9, "message": m}
 
 
-def run(update, notion, start=lambda job: None, editor=lambda job: None):
+def run(update, notion, start=lambda job: None, editor=lambda job: None, on=True):
     tg = FakeTelegram()
     started = []
     notion.editor_started = []
@@ -107,7 +107,7 @@ def run(update, notion, start=lambda job: None, editor=lambda job: None):
         notion.editor_started.append(job)
         return editor(job)
 
-    label = handle_update(update, tg, notion, IDS, CHAT, start_director=_start, start_editor=_editor)
+    label = handle_update(update, tg, notion, IDS, CHAT, start_director=_start, start_editor=_editor, editor_on=on)
     return label, tg, started
 
 
@@ -268,7 +268,7 @@ def test_jobs_command_lists_open_matches_best_first_with_buttons():
     assert label == "jobs"
     text, buttons = tg.sent[0]
     assert text.index("Designer B") < text.index("Designer A") and "88" in text and "Linear" in text
-    assert buttons[0] == [("✅ Brief 1", f"apply:{JID}"), ("ℹ️ More 1", f"more:{JID}")]
+    assert buttons[0] == [("✅ Go forward 1", f"apply:{JID}"), ("ℹ️ More 1", f"more:{JID}")]
     want = handle.alert_threshold()  # the Matcher's strong-match score from settings.yaml
     assert f"'greater_than_or_equal_to': {want}" in str(notion.last_jobs_filter)
 
@@ -496,3 +496,70 @@ def test_free_text_reply_to_an_unbriefed_card_does_not_open_another_job():
     notion = FakeNotion(card_for=555, ready=[_ready(pid=OTHER_ID)])
     label, tg, _ = run(msg("tell me about this", reply_to=555), notion)
     assert label == "reply-help" and notion.editor_started == []
+
+
+def test_director_and_editor_are_switched_off_in_settings():
+    assert handle.editor_enabled() is False
+
+
+def test_go_forward_saves_the_decision_and_starts_nothing():
+    notion = FakeNotion()
+    label, tg, started = run(tap(f"apply:{JID}"), notion, on=False)
+    assert label == "approved" and started == [] and notion.editor_started == []
+    assert notion.page["properties"]["Status"]["select"]["name"] == "Approved"
+    assert "Going forward" in tg.sent[0][0] and "Notion" in tg.sent[0][0] and len(tg.sent) == 1
+
+
+def test_second_go_forward_tap_is_harmless():
+    label, _, started = run(tap(f"apply:{JID}"), FakeNotion(_page(status="Approved")), on=False)
+    assert label == "already" and started == []
+
+
+def test_reply_apply_to_a_card_goes_forward_when_off():
+    notion = FakeNotion(card_for=555)
+    assert run(msg("apply", reply_to=555), notion, on=False)[0] == "approved"
+
+
+def test_skip_still_works_when_off():
+    notion = FakeNotion()
+    assert run(tap(f"skip:{JID}"), notion, on=False)[0] == "skipped"
+    assert notion.page["properties"]["Status"]["select"]["name"] == "Skipped"
+
+
+def test_text_does_not_start_the_editor_when_off():
+    notion = FakeNotion(ready=[_ready()])
+    label, _, _ = run(msg("start the cv"), notion, on=False)
+    assert label == "help" and notion.editor_started == [] and notion.created == []
+
+
+def test_a_leftover_chat_window_is_ignored_when_off():
+    notion = FakeNotion(live=_ready())
+    label, _, _ = run(msg("make it shorter"), notion, on=False)
+    assert label == "help" and notion.created == []
+
+
+def test_help_when_off_says_go_forward_and_offers_no_brief_buttons():
+    notion = FakeNotion(waiting=[_page(status="Approved", title="Designer")])
+    _, tg, _ = run(msg("what now?"), notion, on=False)
+    text, buttons = tg.sent[0]
+    assert "Go forward" in text and "Brief me" not in text and buttons is None
+
+
+def test_greeting_when_off_says_go_forward():
+    _, tg, _ = run(msg("/help"), FakeNotion(), on=False)
+    assert "Go forward" in tg.sent[0][0] and "text me normally" not in tg.sent[0][0]
+
+
+def test_old_brief_buttons_explain_they_are_off():
+    for data in (f"start:{JID}:cv", f"skipasset:{JID}:cv", f"pick:{JID}", f"brief:{JID}", f"resume:{JID}", f"restore:{JID}"):
+        notion = FakeNotion(page=_ready())
+        label, tg, started = run(tap(data), notion, on=False)
+        assert label == "off" and started == [] and notion.editor_started == [] and notion.updates == []
+        assert "switched off" in tg.sent[0][0]
+
+
+def test_jobs_more_and_skip_reasons_still_work_when_off():
+    notion = FakeNotion()
+    assert run(msg("jobs 55"), notion, on=False)[0] == "jobs-none"
+    assert run(tap(f"more:{JID}"), FakeNotion(), on=False)[0] == "more"
+    assert run(tap(f"why:{JID}:senior"), FakeNotion(), on=False)[0] == "why"

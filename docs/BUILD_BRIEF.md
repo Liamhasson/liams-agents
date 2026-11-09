@@ -46,6 +46,8 @@ These are not up for negotiation in code.
 
 ## 3. The team
 
+**Current flow (Nov 2026):** Hunter, Matcher, Telegram card, Go forward or Skip saved in Notion. Liam writes applications himself in Claude. The Researcher, Director and Editor below are built but switched off with `messenger.editor_enabled` in `config/settings.yaml`.
+
 | Agent | Job | Runs | Model |
 |---|---|---|---|
 | **Scout** | Finds new job sources and new companies, detects which hiring tool each company uses, and adds them to Notion. | Weekly | Haiku |

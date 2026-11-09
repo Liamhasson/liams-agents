@@ -45,7 +45,7 @@ def reminder_text(live: list[dict]) -> str:
         fit, score = props.get("Fit score", {}).get("number"), props.get("Score", {}).get("number")
         rating = f" (Fit {fit})" if fit is not None else (f" ({score})" if score is not None else "")
         lines.append(f"• {plain_title(p)[:48]} @ {plain_text(p,'Company')[:22]}{rating}")
-    lines.append("\nReply to a job's message, or text me to start on a brief.")
+    lines.append("\nTap Go forward or Skip on each job's message.")
     return "\n".join(lines)
 
 
