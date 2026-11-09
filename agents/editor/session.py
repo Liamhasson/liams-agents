@@ -11,9 +11,9 @@ replies "approve". On approve the Writer counts the lines he changed, saves the
 approved pack as a reference, and asks once which changed lines go on his
 "Never again" list (docs/workplan-writer-learns.md, step 3).
 
-    python -m agents.writer.session              # auto-pick a ready job
-    python -m agents.writer.session --job <id>
-    python -m agents.writer.session --minutes 25
+    python -m agents.editor.session              # auto-pick a ready job
+    python -m agents.editor.session --job <id>
+    python -m agents.editor.session --minutes 25
 """
 
 from __future__ import annotations

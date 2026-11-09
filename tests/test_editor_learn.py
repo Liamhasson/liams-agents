@@ -7,8 +7,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from agents.writer import learn, session
-from agents.writer.context import NeverAgain, WriterContext
+from agents.editor import learn, session
+from agents.editor.context import NeverAgain, EditorContext
 
 FIRST = ("Hi team,\n\nI built a tool for bookers. So I invented a system from scratch. "
          "It checks every show.\n\nThe second story is the same shape. I pitched a redesign.\n\n"
@@ -116,7 +116,7 @@ class FakeNotion:
 
 def _run_session(replies, revised_letter=FINAL):
     tg, notion, inbox, saved, added = FakeTelegram(), FakeNotion(), FakeInbox(replies), [], []
-    ctx = WriterContext("job1", "Designer", "Acme", "Berlin", "product design", "", "", "", "",
+    ctx = EditorContext("job1", "Designer", "Acme", "Berlin", "product design", "", "", "", "",
                         "", "", [NeverAgain("Already banned.", "x")])
     first = {"cv_markdown": "# Sam\n- Led the launch.", "cover_letter_markdown": FIRST, "review_log": []}
     fakes = {

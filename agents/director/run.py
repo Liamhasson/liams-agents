@@ -89,7 +89,7 @@ def brief_job(job_id: str, *, notion, tg, chat, ids: dict, sonnet, haiku, http, 
 
 def run(job_id: str, dry_run: bool = False) -> dict:
     from agents.researcher.run import run as research
-    from agents.writer.context import load_base_cv, load_mytone
+    from agents.editor.context import load_base_cv, load_mytone
     from shared.http import PoliteClient
     from shared.notion import NotionClient
     from shared.telegram import Telegram

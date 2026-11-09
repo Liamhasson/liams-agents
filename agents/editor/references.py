@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import re
 
-from .context import Reference, WriterContext
+from .context import Reference, EditorContext
 from .learn import split_units
 
 _GREETING = re.compile(r"^(hi|hello|dear|hey)\b", re.I)
@@ -22,12 +22,12 @@ def _words(*texts: str) -> set[str]:
     return {w for t in texts for w in re.findall(r"[a-z]+", t.lower()) if len(w) > 2 and w not in _STOP}
 
 
-def score(ref: Reference, ctx: WriterContext) -> int:
+def score(ref: Reference, ctx: EditorContext) -> int:
     same_company = ref.company.strip().lower() == ctx.company.strip().lower() and ctx.company.strip()
     return 5 * bool(same_company) + len(_words(ref.role, ref.role_type) & _words(ctx.title, ctx.role_type))
 
 
-def pick(ctx: WriterContext, letters: int = 2, cvs: int = 1) -> list[Reference]:
+def pick(ctx: EditorContext, letters: int = 2, cvs: int = 1) -> list[Reference]:
     """The closest approved letters and CVs; newest first among equals."""
     ranked = sorted(ctx.references, key=lambda r: (score(r, ctx), r.approved), reverse=True)
     return ([r for r in ranked if r.kind == "cover letter"][:letters]

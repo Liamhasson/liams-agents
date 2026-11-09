@@ -41,4 +41,4 @@ jobs:
       - name: Co-writing session
         env:
           JOB: ${{ inputs.job }}
-        run: python -m agents.writer.session --minutes 28 ${JOB:+--job "$JOB"}
+        run: python -m agents.editor.session --minutes 28 ${JOB:+--job "$JOB"}

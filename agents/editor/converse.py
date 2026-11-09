@@ -17,7 +17,7 @@ import re
 
 from shared.claude import Claude
 from . import references
-from .context import NeverAgain, WriterContext
+from .context import NeverAgain, EditorContext
 
 WRITER_TEMP = 0.2  # low: hug Liam's examples, resist generic drift
 
@@ -134,12 +134,12 @@ real writing and outrank the guide's example lines.
 - In the CV, reuse approved bullet wording where the role and facts are the same."""
 
 
-def _references_section(ctx: WriterContext, kind: str | None = None) -> str:
+def _references_section(ctx: EditorContext, kind: str | None = None) -> str:
     text = references.block(references.pick(ctx), kind)
     return f"\n{REFERENCE_RULES}\n\n=== APPROVED REFERENCES ===\n{text}\n=== END REFERENCES ===\n" if text else ""
 
 
-def build_system(ctx: WriterContext, with_references: bool = False) -> str:
+def build_system(ctx: EditorContext, with_references: bool = False) -> str:
     refs = _references_section(ctx) if with_references else ""
     return f"""You are Liam Hasson's Writer. You co-write his job application WITH
 him over a Telegram chat, then produce his CV and (if he wants one) cover letter.
@@ -158,7 +158,6 @@ HOW TO TALK TO LIAM (this overrides any generic chat style):
 - When proposing a change, quote the exact line you'd change, then the new version.
 - When he edits something, ask: "Want me to add this to mytone.md?" If he agrees,
   tell him to reply with:  mytone: <the rule>   (that saves it to his voice guide).
-- Early on, ask whether he wants a cover letter for this role or just the CV.
 
 WHAT YOU CAN AND CAN'T DO (never pretend otherwise):
 - You only write THIS application. You can't see his other jobs or their scores,
@@ -188,22 +187,26 @@ Location: {ctx.location}
 Known gaps flagged by the Matcher: {ctx.gaps or 'none'}
 
 Job description:
-{ctx.description[:3000]}
+{ctx.description}
 
 Company research notes:
 {ctx.research or '(none)'}
 === END JOB ===
+
+=== DIRECTOR'S BRIEF (sets the angle, is not a source of facts) ===
+{ctx.brief or '(none)'}
+=== END BRIEF ===
 """
 
 
-def opening(claude: Claude, ctx: WriterContext) -> str:
+def opening(claude: Claude, ctx: EditorContext) -> str:
     kickoff = ("Begin the session for this role. In one short message: ask whether I "
                "want a cover letter or just the CV, then give your hook idea and the one "
                "story you'd lead with, and ask what I think.")
     return claude.chat(build_system(ctx), [{"role": "user", "content": kickoff}], temperature=WRITER_TEMP)
 
 
-def reply(claude: Claude, ctx: WriterContext, history: list[dict]) -> str:
+def reply(claude: Claude, ctx: EditorContext, history: list[dict]) -> str:
     return claude.chat(build_system(ctx), history, temperature=WRITER_TEMP)
 
 
@@ -255,7 +258,7 @@ def lint(text: str, kind: str = "cover letter",
     return issues
 
 
-def voice_issues(ctx: WriterContext, text: str, kind: str) -> list[str]:
+def voice_issues(ctx: EditorContext, text: str, kind: str) -> list[str]:
     """The lint for a real draft: rejected lines everywhere, style rules except on approved sentences."""
     style = lint(references.without_approved(text, references.pick(ctx), kind), kind)
     rejected = [i for i in lint(text, kind, ctx.never_again) if i.startswith("rejected line")]
@@ -287,7 +290,7 @@ _REVIEW_SCHEMA = {
 }
 
 
-def review(claude: Claude, ctx: WriterContext, draft: str, label: str,
+def review(claude: Claude, ctx: EditorContext, draft: str, label: str,
            lint_issues: list[str]) -> dict:
     """One strict pass: check every sentence against the whole guide and the sources."""
     kind = "CV" if label == "CV" else "cover letter"
@@ -344,7 +347,7 @@ _FACT_SCHEMA = {
 }
 
 
-def fact_check(claude: Claude, ctx: WriterContext, draft: str, label: str) -> dict:
+def fact_check(claude: Claude, ctx: EditorContext, draft: str, label: str) -> dict:
     """Compare every claim against the sources, word for word. Nothing else."""
     system = (
         f"You fact-check a draft of Liam Hasson's {label}. There are three sources "
@@ -372,7 +375,7 @@ def fact_check(claude: Claude, ctx: WriterContext, draft: str, label: str) -> di
                             tool_name="submit_fact_check", max_tokens=5000, temperature=0)
 
 
-def enforce_voice(claude: Claude, ctx: WriterContext, draft: str, label: str,
+def enforce_voice(claude: Claude, ctx: EditorContext, draft: str, label: str,
                   log: list[str] | None = None) -> str:
     """Fact-check and review against the whole guide until both pass, plus the lint.
 
@@ -463,7 +466,7 @@ _REVISE_SCHEMA = {
 }
 
 
-def revise(claude: Claude, ctx: WriterContext, drafts: dict, request: str) -> dict:
+def revise(claude: Claude, ctx: EditorContext, drafts: dict, request: str) -> dict:
     """Apply Liam's change to the finished pack. Everything he didn't ask about stays word for word.
 
     No review loop here: if Liam writes a line himself, his words win. The session
@@ -483,7 +486,7 @@ def revise(claude: Claude, ctx: WriterContext, drafts: dict, request: str) -> di
     return res
 
 
-def finalize(claude: Claude, ctx: WriterContext, history: list[dict]) -> dict:
+def finalize(claude: Claude, ctx: EditorContext, history: list[dict]) -> dict:
     convo = "\n".join(f"{m['role']}: {m['content']}" for m in history)
     user = ("Produce the FINAL documents now, based on our conversation below.\n"
             "First read the whole voice guide again. Then fill voice_plan: for each "

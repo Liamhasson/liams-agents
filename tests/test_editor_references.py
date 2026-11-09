@@ -7,8 +7,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from agents.writer import converse, references
-from agents.writer.context import NeverAgain, Reference, WriterContext, parse_reference
+from agents.editor import converse, references
+from agents.editor.context import NeverAgain, Reference, EditorContext, parse_reference
 
 STORY = ("I spent years booking shows, so I know how a release night can go wrong in more "
          "ways than one, and I ran the budgets, the visuals and the bookings myself.")
@@ -23,7 +23,7 @@ def _ref(title, kind="cover letter", company="Acme", role="Product Designer",
 
 
 def _ctx(company="Zeta", title="Product Designer", role_type="product design", refs=(), never=()):
-    return WriterContext("job", title, company, "Berlin", role_type, "", "", "", "", "guide", "cv",
+    return EditorContext("job", title, company, "Berlin", role_type, "", "", "", "", "guide", "cv",
                          list(never), list(refs))
 
 

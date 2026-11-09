@@ -7,8 +7,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from agents.writer.context import NeverAgain
-from agents.writer.converse import _rejected_block, lint
+from agents.editor.context import NeverAgain
+from agents.editor.context import EditorContext
+from agents.editor.converse import _rejected_block, build_system, lint
 
 NEVER = [
     NeverAgain("I've been a Replika user.", "Invented.", "shared"),
@@ -98,3 +99,22 @@ if __name__ == "__main__":
         fn()
         print(f"  ✓ {fn.__name__}")
     print(f"\n{len(fns)} writer lint tests passed.")
+
+
+def _ctx(description="", brief=""):
+    return EditorContext("job1", "Designer", "Acme", "Berlin", "product design", description, "", "", "",
+                         "voice guide", "cv text", brief=brief)
+
+
+def test_system_prompt_has_full_post_and_brief():
+    post = "word " * 1000 + "LASTWORD"
+    system = build_system(_ctx(description=post, brief="They want a builder."))
+    assert "LASTWORD" in system and "They want a builder." in system
+
+
+def test_brief_is_labelled_as_not_a_source_of_facts():
+    assert "not a source of facts" in build_system(_ctx(brief="x"))
+
+
+def test_prompt_no_longer_assumes_a_cover_letter():
+    assert "cover letter for this role or just the CV" not in build_system(_ctx())

@@ -55,7 +55,7 @@ def parse_reference(title: str, page_text: str) -> Reference:
 
 
 @dataclass
-class WriterContext:
+class EditorContext:
     job_page_id: str
     title: str
     company: str
@@ -69,6 +69,7 @@ class WriterContext:
     base_cv: str
     never_again: list[NeverAgain] = field(default_factory=list)
     references: list[Reference] = field(default_factory=list)
+    brief: str = ""  # the Director's brief: sets the angle, is never a source of facts
 
 
 def _private_page_id(notion: NotionClient) -> str | None:
@@ -141,8 +142,8 @@ def load_references(notion: NotionClient) -> list[Reference]:
             if b.get("type") == "child_page"]
 
 
-def build_context(notion: NotionClient, job_page: dict) -> WriterContext:
-    return WriterContext(
+def build_context(notion: NotionClient, job_page: dict) -> EditorContext:
+    return EditorContext(
         job_page_id=job_page["id"],
         title=plain_title(job_page),
         company=plain_text(job_page, "Company"),
@@ -156,4 +157,5 @@ def build_context(notion: NotionClient, job_page: dict) -> WriterContext:
         base_cv=load_base_cv(notion),
         never_again=load_never_again(notion),
         references=load_references(notion),
+        brief=plain_text(job_page, "Director brief"),
     )

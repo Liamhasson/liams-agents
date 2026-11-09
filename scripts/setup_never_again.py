@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from dotenv import load_dotenv
 
-from agents.writer.context import _private_page_id
+from agents.editor.context import _private_page_id
 from shared.notion import NotionClient
 from shared.notion.schema import NEVER_AGAIN_SCHEMA
 
