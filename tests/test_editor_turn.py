@@ -206,3 +206,15 @@ def test_system_prompt_lists_real_abilities_and_old_commands_are_gone():
     system = build_system(_ctx())
     assert "code carries out" in system
     assert 'reply "drop"' not in system and "Want me to add this to mytone" not in system
+
+
+def test_new_draft_reports_what_the_check_still_found(env, monkeypatch):
+    monkeypatch.setattr(act.converse, "voice_issues", lambda ctx, text, kind: ["dash in a sentence"])
+    done = apply_actions(env, [_act("draft_asset", "loom_script")], "go")
+    assert "Heads up" in done.lines[0] and "dash" in done.lines[0]
+
+
+def test_revised_loom_script_is_checked_too(env, monkeypatch):
+    env.assets[1] = _asset("loom_script", "drafted", "old loom")
+    monkeypatch.setattr(act.converse, "voice_issues", lambda ctx, text, kind: ["dash in a sentence"])
+    assert "Heads up" in apply_actions(env, [_act("revise_asset", "loom_script", "x")], "x").lines[0]

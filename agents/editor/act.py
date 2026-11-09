@@ -53,6 +53,14 @@ def _not_drafted(kind: str) -> str:
     return f"{LABELS.get(kind, 'That')} isn't drafted yet, so there's nothing to change. Tell me to draft it first."
 
 
+def _heads_up(env: Env, asset: Asset) -> str:
+    """What the plain code check still finds in this version, if anything."""
+    if asset.kind == "form_answers":
+        return ""
+    issues = converse.voice_issues(env.ctx, asset.text, "CV" if asset.kind == "cv" else "cover letter")
+    return f" Heads up, the check found: {', '.join(sorted(set(issues)))}" if issues else ""
+
+
 def _draft(env: Env, action: dict) -> str:
     kind = action["kind"]
     if not kind:
@@ -70,7 +78,7 @@ def _draft(env: Env, action: dict) -> str:
         return str(e)
     asset = _replace(env, save_text(env.notion, asset, text))
     deliver(env.tg, env.chat, env.ctx, asset)
-    return f"That's your {asset.label}. Tell me what to change."
+    return f"That's your {asset.label}. Tell me what to change.{_heads_up(env, asset)}"
 
 
 def _revise(env: Env, action: dict) -> str:
@@ -83,12 +91,7 @@ def _revise(env: Env, action: dict) -> str:
     text, note = drafts.revise(env.claude, env.ctx, asset, action["instruction"])
     asset = _replace(env, save_text(env.notion, asset, text))
     deliver(env.tg, env.chat, env.ctx, asset)
-    if asset.kind in ("cv", "cover_letter"):
-        label = "CV" if asset.kind == "cv" else "cover letter"
-        issues = converse.voice_issues(env.ctx, text, label)
-        if issues:
-            note += f" Heads up, the check found: {', '.join(sorted(set(issues)))}"
-    return note
+    return note + _heads_up(env, asset)
 
 
 def _skip(env: Env, action: dict) -> str:

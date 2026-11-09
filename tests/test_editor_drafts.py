@@ -162,3 +162,33 @@ def test_one_huge_paragraph_is_still_split():
 
 def test_empty_text_sends_nothing():
     assert split_message("") == []
+
+
+def test_revise_tells_the_model_to_make_the_change_now():
+    model = Model({"text": "new", "note": "Done"})
+    drafts.revise(model, _ctx(), _asset("cv", "old"), "x")
+    assert "Do not offer options" in model.calls[0][1] and "the full" in model.calls[0][1]
+
+
+def test_revise_refuses_a_placeholder_instead_of_the_asset():
+    long = "A real paragraph of the script. " * 40
+    model = Model({"text": "Waiting for Liam's choice.", "note": "Presented two options."})
+    text, note = drafts.revise(model, _ctx(), _asset("loom_script", long), "shorten the first sentence")
+    assert text == long and "didn't apply" in note
+
+
+def test_a_short_asset_can_still_shrink():
+    text, _ = drafts.revise(Model({"text": "Short.", "note": "ok"}), _ctx(), _asset("cover_letter", "A little longer."), "cut")
+    assert text == "Short."
+
+
+def test_loom_markdown_is_removed(voice):
+    raw = "**THE PROBLEM**\n\n---\n\n[SHOW SITE]\n\nHi **team**"
+    text = drafts.draft(Model({"text": raw}), _ctx(), _asset("loom_script"), [])
+    assert text == "THE PROBLEM\n\n[SHOW SITE]\n\nHi team [checked]"
+
+
+def test_loom_prompt_asks_for_plain_text(voice):
+    model = Model({"text": "x"})
+    drafts.draft(model, _ctx(), _asset("loom_script"), [])
+    assert "no markdown" in model.calls[0][1]
