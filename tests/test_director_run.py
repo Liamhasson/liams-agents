@@ -118,6 +118,14 @@ def test_assets_are_created():
     assert [r["properties"]["Kind"]["select"]["name"] for r in n.rows] == ["loom_script"]
 
 
+def test_job_id_without_dashes_still_files_assets_under_the_page_id():
+    n = Notion()
+    director.brief_job(JID, notion=n, tg=Tg(), chat="42", ids={"Assets": "assets"}, sonnet=Model(BRIEF),
+                       haiku=Model({"application_asks": ASKS}), http=object(), research=lambda job: {},
+                       sources=lambda x: ("I built a tool for bookers.", ""))
+    assert n.rows[0]["properties"]["Job"]["rich_text"][0]["plain_text"] == PAGE_ID
+
+
 def test_rerun_does_not_duplicate_assets():
     n = Notion()
     _go(n)

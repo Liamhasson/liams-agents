@@ -1,4 +1,4 @@
-"""The Writer's Sonnet conversation: opening, replies, and final drafts.
+"""The Editor's instructions and checks: what it knows, and what a draft must pass.
 
 Liam's mytone is the voice bible (loaded verbatim). Facts come only from mytone
 + his current CV. Job titles and dates follow the CV; story details follow mytone.
@@ -190,17 +190,6 @@ Company research notes:
 {ctx.brief or '(none)'}
 === END BRIEF ===
 """
-
-
-def opening(claude: Claude, ctx: EditorContext) -> str:
-    kickoff = ("Begin the session for this role. In one short message: ask whether I "
-               "want a cover letter or just the CV, then give your hook idea and the one "
-               "story you'd lead with, and ask what I think.")
-    return claude.chat(build_system(ctx), [{"role": "user", "content": kickoff}], temperature=WRITER_TEMP)
-
-
-def reply(claude: Claude, ctx: EditorContext, history: list[dict]) -> str:
-    return claude.chat(build_system(ctx), history, temperature=WRITER_TEMP)
 
 
 def _strip_cv_dates(text: str) -> str:
@@ -404,100 +393,3 @@ def enforce_voice(claude: Claude, ctx: EditorContext, draft: str, label: str,
     if check_lint(draft):
         draft, _ = review_voice(draft)
     return draft
-
-
-FINAL_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "voice_plan": {
-            "type": "array",
-            "description": ("Fill this FIRST. One item per cover letter paragraph, planned "
-                            "from the voice guide before writing."),
-            "items": {
-                "type": "object",
-                "properties": {
-                    "purpose": {"type": "string", "description": "What this paragraph does (section 4)."},
-                    "move": {"type": "string", "description": "The section 3 move it uses, if any."},
-                    "modelled_on": {"type": "string",
-                                    "description": ("The exact example line from sections 2, 3 or 7, or the approved "
-                                                   "reference paragraph, it copies.")},
-                    "facts": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "claim": {"type": "string"},
-                                "source_quote": {"type": "string",
-                                                 "description": "Exact words from the guide or CV that prove it."},
-                            },
-                            "required": ["claim", "source_quote"],
-                        },
-                    },
-                },
-                "required": ["purpose", "modelled_on", "facts"],
-            },
-        },
-        "cv_markdown": {"type": "string",
-                        "description": "Final one-page CV in the CV FORMAT markdown."},
-        "cover_letter_markdown": {"type": "string",
-                                  "description": "Final cover letter, or '' if Liam chose none."},
-        "summary": {"type": "string", "description": "One line on what you produced."},
-    },
-    "required": ["voice_plan", "cv_markdown", "cover_letter_markdown", "summary"],
-}
-
-
-_REVISE_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "cv_markdown": {"type": "string", "description": "The full CV after the change."},
-        "cover_letter_markdown": {"type": "string",
-                                  "description": "The full cover letter after the change, or '' if none."},
-        "note": {"type": "string", "description": "One short line to Liam on what you changed."},
-    },
-    "required": ["cv_markdown", "cover_letter_markdown", "note"],
-}
-
-
-def revise(claude: Claude, ctx: EditorContext, drafts: dict, request: str) -> dict:
-    """Apply Liam's change to the finished pack. Everything he didn't ask about stays word for word.
-
-    No review loop here: if Liam writes a line himself, his words win. The session
-    shows him the lint result instead of silently rewriting him.
-    """
-    user = ("Here is the finished pack. Liam asked for a change. Apply ONLY what he asked. "
-            "If he gives exact words, use them exactly. Keep every other line word for word. "
-            "If his change needs a fact that isn't in his sources, keep the old line and say "
-            "so in the note.\n\n"
-            f"=== CV ===\n{drafts['cv_markdown']}\n=== END CV ===\n\n"
-            f"=== COVER LETTER ===\n{drafts['cover_letter_markdown'] or '(none)'}\n"
-            f"=== END COVER LETTER ===\n\nLIAM'S CHANGE:\n{request}")
-    res = claude.json_call(build_system(ctx), user, _REVISE_SCHEMA,
-                           tool_name="submit_revision", max_tokens=6000, temperature=0)
-    if res["cover_letter_markdown"].strip() == "(none)":
-        res["cover_letter_markdown"] = ""
-    return res
-
-
-def finalize(claude: Claude, ctx: EditorContext, history: list[dict]) -> dict:
-    convo = "\n".join(f"{m['role']}: {m['content']}" for m in history)
-    user = ("Produce the FINAL documents now, based on our conversation below.\n"
-            "First read the whole voice guide again. Then fill voice_plan: for each "
-            "cover letter paragraph pick the move, quote the real example line you'll "
-            "model it on, and quote the source for every fact. Only then write the "
-            "letter from that plan, and the CV. Use the approved references as the "
-            "rules for them say.\n"
-            "If Liam chose no cover letter, return '' for cover_letter_markdown and an "
-            "empty voice_plan.\n\n" + CV_FORMAT + "\n\nCONVERSATION:\n" + convo)
-    drafts = claude.json_call(build_system(ctx, with_references=True), user, FINAL_SCHEMA,
-                              tool_name="submit_drafts", max_tokens=6000, temperature=WRITER_TEMP)
-    # Mandatory review against the whole guide before anything ships.
-    log: list[str] = []
-    drafts["cv_markdown"] = enforce_voice(claude, ctx, drafts["cv_markdown"], "CV", log)
-    drafts["cover_letter_markdown"] = enforce_voice(
-        claude, ctx, drafts["cover_letter_markdown"], "cover letter", log)
-    drafts["review_log"] = log
-    picked = references.pick(ctx)
-    drafts["reused"] = {**references.reused(drafts["cv_markdown"], picked, "CV"),
-                        **references.reused(drafts["cover_letter_markdown"], picked, "cover letter")}
-    return drafts

@@ -1,23 +1,22 @@
-name: Writer — live co-writing session
+name: Editor — live chat on one application
 
-# Started by the Telegram webhook (api/telegram.py) when Liam taps Apply, or run manually.
+# Started by the Telegram webhook (api/telegram.py) when Liam texts, or run manually.
 on:
   workflow_dispatch:
     inputs:
       job:
-        description: "Notion job page id (empty = next approved job)"
-        required: false
-        default: ""
+        description: "Notion job page id"
+        required: true
 
 # One writing session at a time.
 concurrency:
-  group: writer-session
+  group: editor-session
   cancel-in-progress: false
 
 jobs:
   write:
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    timeout-minutes: 90
     env:
       NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
       NOTION_ROOT_PAGE_ID: ${{ secrets.NOTION_ROOT_PAGE_ID }}
@@ -36,9 +35,7 @@ jobs:
       - name: Install Claude Code
         run: npm install -g @anthropic-ai/claude-code
       - run: python -m playwright install chromium --with-deps
-      - name: Research (ensure notes exist)
-        run: python -m agents.researcher.run
-      - name: Co-writing session
+      - name: Editor session
         env:
           JOB: ${{ inputs.job }}
-        run: python -m agents.editor.session --minutes 28 ${JOB:+--job "$JOB"}
+        run: python -m agents.editor.session --job "$JOB"

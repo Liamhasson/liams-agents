@@ -7,8 +7,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from agents.editor import learn, session
-from agents.editor.context import NeverAgain, EditorContext
+from agents.editor import learn
 
 FIRST = ("Hi team,\n\nI built a tool for bookers. So I invented a system from scratch. "
          "It checks every show.\n\nThe second story is the same shape. I pitched a redesign.\n\n"
@@ -43,154 +42,9 @@ def test_diff_pairs_a_merged_sentence_with_the_line_it_became():
     ]
 
 
-def test_candidates_skip_lines_liam_only_added_words_to():
-    changes = [learn.Change("Nobody had asked for a redesign.", "At Acme nobody had asked for a redesign.")]
-    assert learn.candidates(changes, []) == []
-
-
-def test_candidates_skip_added_lines_and_known_entries():
-    changes = [learn.Change("Old slogan.", "New line."), learn.Change(None, "Brand new line."),
-               learn.Change("Already banned.", None), learn.Change("Old slogan.", "Again.")]
-    known = [NeverAgain("already banned.", "x")]
-    assert learn.candidates(changes, known) == [learn.Change("Old slogan.", "New line.")]
-
-
-def test_reason_quotes_liams_fix_and_never_guesses():
-    assert learn.reason(learn.Change("a", "b")) == 'Liam rewrote it as: "b"'
-    assert learn.reason(learn.Change("a", None)) == "Liam cut it."
-
-
-def test_parse_pick():
-    assert learn.parse_pick("all", 3) == [0, 1, 2]
-    assert learn.parse_pick("None.", 3) == []
-    assert learn.parse_pick("1, 3", 3) == [0, 2]
-    assert learn.parse_pick("2 and 1", 3) == [0, 1]
-    assert learn.parse_pick("4", 3) is None
-    assert learn.parse_pick("change the closing", 3) is None
-
-
-def test_confirm_message_escapes_html():
-    msg = learn.confirm_message([("cover letter", learn.Change("Design & <Insights>", None))])
-    assert "Design &amp; &lt;Insights&gt;" in msg and "Add it to" in msg
-
-
-# ---- the session flow, with Telegram, Notion and Claude faked ----------------
-
-class FakeInbox:
-    """Liam's replies as the webhook would have saved them to the Notion Inbox."""
-
-    def __init__(self, replies):
-        self.replies, self.drained = list(replies), False
-
-    def drain(self):
-        self.drained = True
-
-    def wait(self, seconds):
-        return [self.replies.pop(0)] if self.replies else []
-
-
-class FakeTelegram:
-    def __init__(self):
-        self.sent = []
-
-    def send_message(self, chat, text, buttons=None):
-        self.sent.append(text)
-
-    def send_document(self, chat, path, caption=""):
-        self.sent.append(f"[doc] {caption}")
-
-
-class FakeNotion:
-    def __init__(self):
-        self.updates, self.sessions = [], []
-
-    def update_page(self, page_id, props):
-        if list(props) == ["Session until"]:
-            self.sessions.append(props["Session until"]["date"])
-        else:
-            self.updates.append(props)
-
-    def ensure_databases(self):
-        return {"Jobs": "jobs"}
-
-
-def _run_session(replies, revised_letter=FINAL):
-    tg, notion, inbox, saved, added = FakeTelegram(), FakeNotion(), FakeInbox(replies), [], []
-    ctx = EditorContext("job1", "Designer", "Acme", "Berlin", "product design", "", "", "", "",
-                        "", "", [NeverAgain("Already banned.", "x")])
-    first = {"cv_markdown": "# Sam\n- Led the launch.", "cover_letter_markdown": FIRST, "review_log": []}
-    fakes = {
-        (session, "NotionClient"): lambda: notion,
-        (session, "Telegram"): lambda: tg,
-        (session, "Claude"): lambda model=None: type("C", (), {"cost_summary": lambda self: ""})(),
-        (session, "_pick_job"): lambda n, db, j: {"id": "job1"},
-        (session, "_open_inbox"): lambda n, ids, j: inbox,
-        (session, "_offer_next"): lambda *a: None,
-        (session.ctxmod, "build_context"): lambda n, job: ctx,
-        (session.converse, "opening"): lambda c, x: "Hi",
-        (session.converse, "finalize"): lambda c, x, h: dict(first),
-        (session.converse, "revise"): lambda c, x, d, r: {
-            "cv_markdown": d["cv_markdown"], "cover_letter_markdown": revised_letter, "note": "Done."},
-        (session, "_send_pack"): lambda *a: None,
-        (session.learn, "save_reference"): lambda *a: saved.append(a[1]),
-        (session.learn, "add_never_again"): lambda *a: added.append(a[1:]),
-        (session.config, "require"): lambda key: "42",
-        (session.usage, "log_run"): lambda *a: None,
-    }
-    originals = {k: getattr(*k) for k in fakes}
-    try:
-        for (mod, name), fake in fakes.items():
-            setattr(mod, name, fake)
-        result = session.run(minutes=0.05)
-    finally:
-        for (mod, name), orig in originals.items():
-            setattr(mod, name, orig)
-    assert inbox.drained, "old Inbox messages must be cleared before the session starts"
-    # The session marks itself live for the webhook, then always clears it at the end.
-    assert len(notion.sessions) == 2 and notion.sessions[0] and notion.sessions[-1] is None
-    return result, tg, notion, saved, added
-
-
-def test_session_without_drafts_goes_back_to_approved_on_timeout():
-    result, tg, notion, *_ = _run_session([])
-    assert result == {"drafted": 0, "timed_out": True}
-    assert notion.updates[-1] == {"Status": {"select": {"name": "Approved"}}}
-    assert "start again" in tg.sent[-1]
-
-
-def test_drop_ends_the_session_and_skips_the_job():
-    result, tg, notion, *_ = _run_session(["Drop this. I don't want to work in crypto."])
-    assert result == {"drafted": 0, "dropped": True}
-    assert notion.updates[-1] == {"Status": {"select": {"name": "Skipped"}}}
-    assert "Dropped" in tg.sent[-1]
-
-
-def test_drop_words_dont_catch_ordinary_edits():
-    assert session.wants_drop("drop") and session.wants_drop("cancel this.")
-    assert not session.wants_drop("stop using dashes") and not session.wants_drop("drop the second bullet")
-
-
-def test_session_counts_edits_saves_references_and_adds_only_picked_lines():
-    result, tg, notion, saved, added = _run_session(["done", "swap the invented line", "approve", "1"])
-    assert result == {"drafted": 1, "approved": True}
-    assert saved == ["Acme resume", "Acme cover letter"]
-    assert {"Lines changed": {"number": 2}}.items() <= notion.updates[-2].items()
-    assert notion.updates[-1] == {"Status": {"select": {"name": "Ready to send"}}}
-    assert added == [("So I invented a system from scratch.",
-                      'Liam rewrote it as: "So I built a way to check."', "cover letter", "Acme, Designer")]
-    assert any("You changed 2 lines" in m for m in tg.sent)
-
-
-def test_session_approve_without_edits_asks_nothing():
-    result, tg, notion, saved, added = _run_session(["done", "approve"])
-    assert result["approved"] and added == []
-    assert {"Lines changed": {"number": 0}}.items() <= notion.updates[-2].items()
-    assert not any("Never again list?" in m for m in tg.sent)
-
-
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     for fn in fns:
         fn()
         print(f"  ✓ {fn.__name__}")
-    print(f"\n{len(fns)} writer learning tests passed.")
+    print(f"\n{len(fns)} Editor line-count tests passed.")

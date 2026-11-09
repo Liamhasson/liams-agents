@@ -39,6 +39,7 @@ def _brief(job_id, *, notion, tg, chat, ids, sonnet, haiku, http, research, sour
     jid = job_id.replace("-", "")
     result = research(job_id)
     page = notion.get_page(job_id)
+    job_id = page["id"]  # the webhook passes it without dashes; other tables key on Notion's own form
     title, company, post = plain_title(page), plain_text(page, "Company"), plain_text(page, "Description")
     notes = (result or {}).get("notes") or plain_text(page, "Research notes")
 
