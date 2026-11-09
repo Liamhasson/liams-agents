@@ -32,11 +32,10 @@ SCHEMA = {
                        "description": "Likelihood this is an evergreen/ghost post, from the text."},
         "ghost_reason": {"type": "string", "description": "One short phrase; '' if low."},
         "application_asks": {"type": "array", "items": ASK_ITEM_SCHEMA},
-        "ad_work_quote": {"type": "string", "description": "The post's exact words if ad work is part of the role, else ''."},
     },
     "required": ["score", "role_type", "field", "fit_summary", "why_you", "gaps", "flags",
                  "years_required", "discipline", "german_required", "remote_eligibility", "ghost_risk", "ghost_reason",
-                 "application_asks", "ad_work_quote"],
+                 "application_asks"],
 }
 
 SYSTEM = """You score design jobs for Liam Hasson against his profile below.
@@ -75,7 +74,8 @@ Rules:
   product itself is new technology (AI models or agents, robotics, space, new
   hardware, deep tech); 'cyber' (cybersecurity, defence tech). Software tools,
   developer tools, data platforms, productivity, finance, banking, crypto, trading,
-  B2B SaaS and marketplaces are 'other', even if they use AI.
+  B2B SaaS and marketplaces are 'other', even if they use AI. A tool for building
+  software or managing work is 'other' even when it's made for AI agents.
 - years_required: the minimum years of design experience (product, UX, UI,
   visual, brand) the post asks for, as a number. "5+ years" -> 5; "3-5 years" -> 3;
   "at least 4 years" -> 4. 0 if the post states no number, even for a senior title.
@@ -167,6 +167,11 @@ def avoided_industry(title: str, company: str, description: str, rules: dict) ->
         if sum(len(p.findall(body)) for p in pats) >= need:
             return name
     return ""
+
+
+def senior_title(title: str) -> bool:
+    """The title says senior. It's shown on the card and never costs points."""
+    return bool(re.search(r"\b(senior|sr\.?|lead|principal)(?![a-z])", title or "", re.I))
 
 
 def is_hard_drop(title: str, description: str, keywords: list[str]) -> bool:

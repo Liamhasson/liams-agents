@@ -23,11 +23,10 @@ from shared.claude import Claude
 from shared.notion import NotionClient
 from shared.notion.client import _long_rt, plain_title, plain_text, plain_select, plain_date
 from shared.notion.schema import ROLE_TYPES
-from shared.quotes import appears_in
-from .asks import verified_asks
+from .asks import ad_work_line, verified_asks
 from .profile import load_profile
 from .score import (score, route, is_hard_drop, avoided_industry, assess_ghost, freshness, adjust, age_points,
-                    onsite_outside_berlin, written_in_german)
+                    onsite_outside_berlin, senior_title, written_in_german)
 
 _CONFIG = Path(__file__).resolve().parent.parent.parent / "config" / "settings.yaml"
 
@@ -138,6 +137,8 @@ def run(limit: int | None = None, rescore: bool = False, dry_run: bool = False,
             decision, reason = route(res, alert, ask, cfg)
 
         flags = list(res.get("flags", []))
+        if senior_title(title) and "senior" not in flags:
+            flags.append("senior")
         if decision == "ask" and "borderline" not in flags:
             flags.append("borderline")
         if ghost_risk in ("medium", "high") and "ghost" not in flags:
@@ -148,8 +149,7 @@ def run(limit: int | None = None, rescore: bool = False, dry_run: bool = False,
             summary = f"[dropped: {reason}] {summary}".strip()
 
         asks = verified_asks(res.get("application_asks"), desc)
-        ad_quote = res.get("ad_work_quote", "")
-        ad_work = ad_quote if appears_in(ad_quote, desc) else ""
+        ad_work = ad_work_line(desc)
         res["verified_asks"], res["ad_work"] = asks, ad_work
 
         counts[decision] += 1

@@ -9,8 +9,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from agents.matcher.score import (route, is_hard_drop, avoided_industry, assess_ghost, freshness, adjust, age_points,
                                   onsite_outside_berlin, written_in_german)
-from agents.matcher.asks import verified_asks
-from agents.matcher.score import SCHEMA, SYSTEM
+from agents.matcher.asks import ad_work_line, verified_asks
+from agents.matcher.score import SCHEMA, SYSTEM, senior_title
 from shared.notion.client import _long_rt
 
 ALERT, ASK = 70, 40
@@ -116,9 +116,37 @@ def test_prompt_never_lowers_fit_for_a_title():
     assert "AND level" not in SYSTEM
 
 
-def test_schema_asks_for_application_asks_and_ad_work():
-    assert "application_asks" in SCHEMA["properties"] and "ad_work_quote" in SCHEMA["properties"]
-    assert {"application_asks", "ad_work_quote"} <= set(SCHEMA["required"])
+def test_schema_asks_for_application_asks():
+    assert "application_asks" in SCHEMA["properties"] and "application_asks" in SCHEMA["required"]
+
+
+def test_ad_work_found_in_the_posts_own_sentence():
+    post = "You own the website. You also create our event banners, flyers, ads and social assets. Join us."
+    assert ad_work_line(post) == "You also create our event banners, flyers, ads and social assets."
+
+
+def test_ad_campaigns_count_as_ad_work():
+    assert "ad campaigns" in ad_work_line("You design landing pages and ad campaigns for launches.")
+
+
+def test_ad_creative_counts_as_ad_work():
+    assert ad_work_line("Design emails, website sections, and social/ad creative for brands.")
+
+
+def test_campaign_graphics_are_not_ad_work():
+    assert ad_work_line("Deliver landing pages, visuals, campaign graphics, and interactive components.") == ""
+    assert ad_work_line("Bring concepts to life across web, campaigns, events and print.") == ""
+
+
+def test_working_near_a_paid_media_team_is_not_ad_work():
+    assert ad_work_line("You work closely with our email, CRO and paid media teams.") == ""
+
+
+def test_senior_titles_are_recognised():
+    for title in ("Senior Product Designer", "(Senior) Product Designer (m/f/d)", "Sr. Product Designer",
+                  "Lead Designer", "Principal UX Designer"):
+        assert senior_title(title), title
+    assert not senior_title("Product Designer")
 
 
 def test_favourite_fields_score_higher_and_others_are_untouched():
