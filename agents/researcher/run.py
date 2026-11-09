@@ -121,6 +121,7 @@ def run(limit: int | None = None, dry_run: bool = False, job_id: str | None = No
     print(f"Researching {len(jobs)} approved job(s)...")
 
     done = failed = 0
+    notes = ""
     for page in jobs:
         title, company = plain_title(page), plain_text(page, "Company")
         desc = plain_text(page, "Description")
@@ -153,7 +154,7 @@ def run(limit: int | None = None, dry_run: bool = False, job_id: str | None = No
           + ("  [dry-run]" if dry_run else ""))
     if failed and not done:
         raise RuntimeError(f"Every research call failed ({failed}). The jobs are retried next run.")
-    return {"researched": done}
+    return {"researched": done, "notes": notes}
 
 
 if __name__ == "__main__":

@@ -78,35 +78,40 @@ def msg(text, chat=CHAT, reply_to=None):
     return {"update_id": 9, "message": m}
 
 
-def run(update, notion, start=lambda job: None):
+def run(update, notion, start=lambda job: None, editor=lambda job: None):
     tg = FakeTelegram()
     started = []
+    notion.editor_started = []
 
     def _start(job):
         started.append(job)
         return start(job)
 
-    label = handle_update(update, tg, notion, IDS, CHAT, start=_start)
+    def _editor(job):
+        notion.editor_started.append(job)
+        return editor(job)
+
+    label = handle_update(update, tg, notion, IDS, CHAT, start_director=_start, start_editor=_editor)
     return label, tg, started
 
 
-def test_apply_tap_approves_confirms_and_starts_writer():
+def test_brief_me_tap_approves_and_starts_director():
     notion = FakeNotion()
     label, tg, started = run(tap(f"apply:{JID}"), notion)
-    assert label == "writer-started"
+    assert label == "director-started"
     assert notion.page["properties"]["Status"]["select"]["name"] == "Approved"
     assert tg.answered == ["q1"]  # spinner stopped
     assert started == [JID]
     texts = [t for t, _ in tg.sent]
     assert "Approved" in texts[0] and "Product Designer" in texts[0]
-    assert "few minutes" in texts[1]
+    assert "couple of minutes" in texts[1]
 
 
-def test_writer_that_fails_to_start_tells_liam_why():
+def test_director_that_fails_to_start_tells_liam_why():
     notion = FakeNotion()
     label, tg, _ = run(tap(f"apply:{JID}"), notion, start=lambda job: "GitHub said 403: Bad credentials")
-    assert label == "writer-failed"
-    assert "Couldn't start the Writer" in tg.sent[-1][0] and "403" in tg.sent[-1][0]
+    assert label == "director-failed"
+    assert "Couldn't start the Director" in tg.sent[-1][0] and "403" in tg.sent[-1][0]
 
 
 def test_second_apply_tap_says_already_handled_and_starts_nothing():
@@ -133,11 +138,20 @@ def test_tap_from_another_chat_is_refused():
     assert label == "not-mine" and started == [] and notion.updates == [] and tg.sent == []
 
 
-def test_apply_while_writing_another_job_says_it_will_follow():
+def test_brief_me_works_during_another_chat():
     live = {"id": "other-job"}
     label, tg, started = run(tap(f"apply:{JID}"), FakeNotion(live=live))
-    assert label == "writer-started" and started == [JID]
-    assert "as soon as the current write-up is done" in tg.sent[-1][0]
+    assert label == "director-started" and started == [JID]
+
+
+def test_old_apply_and_yes_buttons_still_work():
+    assert run(tap(f"yes:{JID}"), FakeNotion())[0] == "director-started"
+    assert run(tap(f"apply:{JID}"), FakeNotion())[0] == "director-started"
+
+
+def test_retry_button_restarts_a_failed_brief():
+    label, _, started = run(tap(f"brief:{JID}"), FakeNotion(_page(status="Approved")))
+    assert label == "director-started" and started == [JID]
 
 
 def test_message_during_live_session_goes_to_inbox():
@@ -151,10 +165,10 @@ def test_message_during_live_session_goes_to_inbox():
     assert props["Read"] == {"checkbox": False}
 
 
-def test_reply_apply_to_job_card_approves_and_starts_writer():
+def test_reply_apply_to_job_card_starts_director():
     notion = FakeNotion(card_for=555)
     label, tg, started = run(msg("apply", reply_to=555), notion)
-    assert label == "writer-started" and started == [JID]
+    assert label == "director-started" and started == [JID]
 
 
 def test_reply_apply_to_job_card_mid_session_is_still_a_decision():
@@ -169,7 +183,7 @@ def test_unknown_text_gets_help_and_resume_buttons():
     assert label == "help"
     text, buttons = tg.sent[0]
     assert "didn't catch that" in text
-    assert buttons == [[("▶️ Write: Brand Designer", f"resume:{JID}")]]
+    assert buttons == [[("▶️ Brief me: Brand Designer", f"resume:{JID}")]]
 
 
 def test_unknown_text_with_nothing_waiting_still_gets_a_reply():
@@ -182,21 +196,21 @@ def test_greeting():
     assert label == "greeting" and "Hi Liam" in tg.sent[0][0]
 
 
-def test_resume_tap_starts_writer_for_approved_job():
+def test_resume_tap_briefs_an_approved_job():
     label, tg, started = run(tap(f"resume:{JID}"), FakeNotion(_page(status="Approved")))
-    assert label == "writer-started" and started == [JID]
+    assert label == "director-started" and started == [JID]
 
 
-def test_resume_tap_for_already_written_job_does_nothing():
-    label, tg, started = run(tap(f"resume:{JID}"), FakeNotion(_page(status="Approved", cv="# CV")))
+def test_resume_tap_for_an_already_briefed_job_does_nothing():
+    label, tg, started = run(tap(f"resume:{JID}"), FakeNotion(_page(status="Briefed")))
     assert label == "already" and started == []
 
 
-def test_start_writer_without_token_explains():
+def test_start_director_without_token_explains():
     import os
     saved = os.environ.pop("GITHUB_DISPATCH_TOKEN", None)
     try:
-        assert handle.start_writer("x") == "GITHUB_DISPATCH_TOKEN is not set"
+        assert handle.start_director("x") == "GITHUB_DISPATCH_TOKEN is not set"
     finally:
         if saved is not None:
             os.environ["GITHUB_DISPATCH_TOKEN"] = saved

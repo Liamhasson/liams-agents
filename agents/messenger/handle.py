@@ -51,7 +51,7 @@ def alert_threshold() -> int:
     return _matcher_setting("alert_threshold", 70)
 
 HELP = ("Here's what I understand:\n"
-        "• Tap <b>Apply</b>, <b>Skip</b> or <b>Tell me more</b> on a job.\n"
+        "• Tap <b>Brief me</b>, <b>Skip</b> or <b>Tell me more</b> on a job.\n"
         "• Or reply <b>apply</b>, <b>skip</b> or <b>more</b> to a job message.\n"
         "• Send <b>jobs</b> to see your open matches (or <b>jobs 60</b> for a lower score).\n"
         "• While we're writing an application together, just talk to me normally.")
@@ -69,8 +69,8 @@ def uuid(jid: str) -> str:
     return jid
 
 
-def start_writer(job_id: Optional[str] = None) -> Optional[str]:
-    """Start the Writer workflow on GitHub. Returns None on success, else what went wrong."""
+def dispatch(workflow: str, job_id: Optional[str] = None) -> Optional[str]:
+    """Start a workflow on GitHub. Returns None on success, else what went wrong."""
     token = os.environ.get("GITHUB_DISPATCH_TOKEN")
     if not token:
         return "GITHUB_DISPATCH_TOKEN is not set"
@@ -80,7 +80,7 @@ def start_writer(job_id: Optional[str] = None) -> Optional[str]:
         payload["inputs"] = {"job": job_id}
     try:
         r = httpx.post(
-            f"https://api.github.com/repos/{repo}/actions/workflows/writer.yml/dispatches",
+            f"https://api.github.com/repos/{repo}/actions/workflows/{workflow}/dispatches",
             headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json",
                      "X-GitHub-Api-Version": "2022-11-28"},
             json=payload, timeout=20,
@@ -96,13 +96,22 @@ def start_writer(job_id: Optional[str] = None) -> Optional[str]:
     return f"GitHub said {r.status_code}: {reason}"
 
 
-class Handler:
-    """Holds the clients for one update. `start` is injectable for tests."""
+def start_director(job_id: Optional[str] = None) -> Optional[str]:
+    return dispatch("director.yml", job_id)
 
-    def __init__(self, tg, notion, ids: dict, chat, start: Callable = start_writer):
+
+def start_editor(job_id: Optional[str] = None) -> Optional[str]:
+    return dispatch("editor.yml", job_id)
+
+
+class Handler:
+    """Holds the clients for one update. The two start functions are injectable for tests."""
+
+    def __init__(self, tg, notion, ids: dict, chat, start_director: Callable = start_director,
+                 start_editor: Callable = start_editor):
         self.tg, self.notion, self.chat = tg, notion, chat
         self.jobs_db, self.inbox_db = ids["Jobs"], ids.get("Inbox")
-        self.start = start
+        self.start_director, self.start_editor = start_director, start_editor
 
     # ---- entry point ------------------------------------------------------
     def handle(self, update: dict) -> str:
@@ -131,25 +140,21 @@ class Handler:
         return rows[0] if rows else None
 
     def waiting_to_write(self) -> list[dict]:
-        """Approved jobs with no draft yet, which the Writer could pick up."""
+        """Approved jobs with no brief yet, which the Director could pick up."""
         return self.notion.query_database(self.jobs_db, {"and": [
             {"property": "Status", "select": {"equals": "Approved"}},
-            {"property": "CV draft", "rich_text": {"is_empty": True}},
+            {"property": "Director brief", "rich_text": {"is_empty": True}},
         ]})
 
-    def _kick_writer(self, page_id: str, title: str) -> str:
-        """Start the Writer for this job and tell Liam it's coming, or why it isn't."""
-        busy = self.live_session_job()
-        err = self.start(page_id.replace("-", ""))
+    def _kick_director(self, page_id: str, title: str) -> str:
+        """Start the Director for this job and tell Liam it's coming, or why it isn't."""
+        err = self.start_director(page_id.replace("-", ""))
         if err:
-            self.tg.send_message(self.chat, f"⚠️ Couldn't start the Writer for <b>{html.escape(title)}</b>: "
+            self.tg.send_message(self.chat, f"⚠️ Couldn't start the Director for <b>{html.escape(title)}</b>: "
                                             f"{html.escape(err)}\nThe job is saved as Approved, so nothing is lost.")
-            return "writer-failed"
-        if busy and busy["id"] != page_id:
-            self.tg.send_message(self.chat, "I'll start on it as soon as the current write-up is done.")
-        else:
-            self.tg.send_message(self.chat, "Starting the write-up now. My first message comes in a few minutes.")
-        return "writer-started"
+            return "director-failed"
+        self.tg.send_message(self.chat, "Reading up on them. Your brief comes in a couple of minutes.")
+        return "director-started"
 
     def _decide(self, page: dict, decision: str) -> bool:
         """Move a job to Approved/Skipped. False if Liam already decided on it."""
@@ -166,7 +171,7 @@ class Handler:
                                             f"({html.escape(plain_select(page, 'Status') or 'no status')}).")
             return "already"
         self.tg.send_message(self.chat, f"✅ Approved: <b>{html.escape(title)}</b>")
-        return self._kick_writer(page["id"], title)
+        return self._kick_director(page["id"], title)
 
     def _skip(self, page: dict) -> str:
         title = plain_title(page)
@@ -210,16 +215,16 @@ class Handler:
         if action == "more":
             self.tg.send_message(self.chat, details_text(page))
             return "more"
-        if action == "resume":
+        if action in ("resume", "brief"):
             return self._resume(page)
         return "ignored"
 
     def _resume(self, page: dict) -> str:
         title = plain_title(page)
-        if plain_select(page, "Status") != "Approved" or plain_text(page, "CV draft"):
-            self.tg.send_message(self.chat, f"<b>{html.escape(title)}</b> isn't waiting to be written any more.")
+        if plain_select(page, "Status") != "Approved" or plain_text(page, "Director brief"):
+            self.tg.send_message(self.chat, f"<b>{html.escape(title)}</b> has already been briefed.")
             return "already"
-        return self._kick_writer(page["id"], title)
+        return self._kick_director(page["id"], title)
 
     # ---- typed messages ---------------------------------------------------
     def _message(self, msg: dict, update_id) -> str:
@@ -295,8 +300,8 @@ class Handler:
         text = "I didn't catch that, sorry. " + HELP
         buttons = None
         if waiting:
-            text += "\n\nThese are approved and waiting to be written:"
-            buttons = [[(f"▶️ Write: {plain_title(p)[:40]}", f"resume:{p['id'].replace('-', '')}")]
+            text += "\n\nThese are approved and waiting for a brief:"
+            buttons = [[(f"▶️ Brief me: {plain_title(p)[:40]}", f"resume:{p['id'].replace('-', '')}")]
                        for p in waiting]
         self.tg.send_message(self.chat, text, buttons)
         return "help"
@@ -314,5 +319,6 @@ class Handler:
         self.notion.create_page(self.inbox_db, props)
 
 
-def handle_update(update: dict, tg, notion, ids: dict, chat, start: Callable = start_writer) -> str:
-    return Handler(tg, notion, ids, chat, start).handle(update)
+def handle_update(update: dict, tg, notion, ids: dict, chat, start_director: Callable = start_director,
+                  start_editor: Callable = start_editor) -> str:
+    return Handler(tg, notion, ids, chat, start_director, start_editor).handle(update)
