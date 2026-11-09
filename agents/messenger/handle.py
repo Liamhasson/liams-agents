@@ -30,19 +30,25 @@ GREETINGS = {"/start", "start", "hi", "hello", "hey", "/help", "help"}
 
 JOBS_COMMAND = re.compile(r"^/?(?:show |open |my )?jobs(?: (\d{1,3}))?\??$")
 JOBS_SHOWN = 8
+SKIP_REASONS = {"senior": "too senior", "field": "wrong field", "ad": "ad work",
+                "location": "location", "other": "other"}
 
 DEFAULT_REPO = "Liamhasson/liams-agents"
 _SETTINGS = os.path.join(os.path.dirname(__file__), "..", "..", "config", "settings.yaml")
 
 
-def alert_threshold() -> int:
-    """The Matcher's 'strong match' score (settings > matcher > alert_threshold)."""
+def _matcher_setting(name: str, default: int) -> int:
     try:
         import yaml
         with open(_SETTINGS) as fh:
-            return int((yaml.safe_load(fh).get("matcher") or {}).get("alert_threshold", 70))
+            return int((yaml.safe_load(fh).get("matcher") or {}).get(name, default))
     except Exception:
-        return 70
+        return default
+
+
+def alert_threshold() -> int:
+    """The Matcher's 'strong match' score (settings > matcher > alert_threshold)."""
+    return _matcher_setting("alert_threshold", 70)
 
 HELP = ("Here's what I understand:\n"
         "• Tap <b>Apply</b>, <b>Skip</b> or <b>Tell me more</b> on a job.\n"
@@ -167,7 +173,11 @@ class Handler:
         if not self._decide(page, "skip"):
             self.tg.send_message(self.chat, f"<b>{html.escape(title)}</b> is already handled.")
             return "already"
-        self.tg.send_message(self.chat, f"⏭ Skipped: <b>{html.escape(title)}</b>")
+        jid = page["id"].replace("-", "")
+        reasons = [[("Too senior", f"why:{jid}:senior"), ("Wrong field", f"why:{jid}:field")],
+                   [("Ad work", f"why:{jid}:ad"), ("Location", f"why:{jid}:location"), ("Other", f"why:{jid}:other")]]
+        self.tg.send_message(self.chat, f"⏭ Skipped: <b>{html.escape(title)}</b>\nWhy? Optional, it helps tune the grading.",
+                             reasons)
         return "skipped"
 
     # ---- button taps ------------------------------------------------------
@@ -176,13 +186,21 @@ class Handler:
         if not self._mine(cq.get("message", {}).get("chat", {}).get("id")):
             self._answer(qid, "Not authorised.")
             return "not-mine"
-        action, _, jid = (cq.get("data") or "").partition(":")
+        action, _, rest = (cq.get("data") or "").partition(":")
+        jid, _, arg = rest.partition(":")
         if action == "test":
             self._answer(qid, "👍 thanks!")
             return "test"
         if not jid:
             self._answer(qid)
             return "ignored"
+        if action == "why":
+            if arg not in SKIP_REASONS:
+                self._answer(qid)
+                return "ignored"
+            self.notion.update_page(uuid(jid), {"Skip reason": {"select": {"name": SKIP_REASONS[arg]}}})
+            self._answer(qid, "Saved")
+            return "why"
         self._answer(qid)  # stop the spinner first; the reply message follows
         page = self.notion.get_page(uuid(jid))
         if action in ("apply", "yes"):
@@ -242,6 +260,8 @@ class Handler:
             {"or": [{"property": "Status", "select": {"equals": s}} for s in sorted(PRE_ACTION)]},
             {"property": "Score", "number": {"greater_than_or_equal_to": min_score}},
         ]})
+        floor = _matcher_setting("min_fit", 50)
+        rows = [p for p in rows if plain_number(p, "Fit score") is None or plain_number(p, "Fit score") >= floor]
         rows.sort(key=lambda p: plain_number(p, "Score") or 0, reverse=True)
         if not rows:
             self.tg.send_message(self.chat, f"No open jobs scoring {min_score} or more right now. "
@@ -253,10 +273,12 @@ class Handler:
         buttons = []
         for i, p in enumerate(shown, 1):
             company = plain_text(p, "Company")
-            lines.append(f"{i}. <b>{plain_number(p, 'Score') or 0}</b> · {html.escape(plain_title(p))}"
+            fit = plain_number(p, "Fit score")
+            rating = f"Fit {fit}" if fit is not None else str(plain_number(p, "Score") or 0)
+            lines.append(f"{i}. <b>{rating}</b> · {html.escape(plain_title(p))}"
                          + (f" at {html.escape(company)}" if company else ""))
             jid = p["id"].replace("-", "")
-            buttons.append([(f"✅ Apply {i}", f"apply:{jid}"), (f"ℹ️ More {i}", f"more:{jid}")])
+            buttons.append([(f"✅ Brief {i}", f"apply:{jid}"), (f"ℹ️ More {i}", f"more:{jid}")])
         self.tg.send_message(self.chat, "\n".join(lines), buttons)
         return "jobs"
 

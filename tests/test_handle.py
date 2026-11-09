@@ -238,7 +238,7 @@ def test_jobs_command_lists_open_matches_best_first_with_buttons():
     assert label == "jobs"
     text, buttons = tg.sent[0]
     assert text.index("Designer B") < text.index("Designer A") and "88" in text and "Linear" in text
-    assert buttons[0] == [("✅ Apply 1", f"apply:{JID}"), ("ℹ️ More 1", f"more:{JID}")]
+    assert buttons[0] == [("✅ Brief 1", f"apply:{JID}"), ("ℹ️ More 1", f"more:{JID}")]
     want = handle.alert_threshold()  # the Matcher's strong-match score from settings.yaml
     assert f"'greater_than_or_equal_to': {want}" in str(notion.last_jobs_filter)
 
@@ -248,3 +248,39 @@ def test_jobs_with_a_number_uses_that_score_and_works_mid_session():
     label, tg, _ = run(msg("Jobs 55"), notion)
     assert label == "jobs-none" and notion.created == []  # not sent to the Writer's inbox
     assert "55" in tg.sent[0][0] and "jobs 35" in tg.sent[0][0]
+
+
+def test_skip_offers_optional_reasons():
+    notion = FakeNotion()
+    label, tg, _ = run(tap(f"skip:{JID}"), notion)
+    datas = [d for row in tg.sent[0][1] for _, d in row]
+    assert label == "skipped" and f"why:{JID}:senior" in datas and f"why:{JID}:ad" in datas
+
+
+def test_skip_reason_tap_is_recorded():
+    notion = FakeNotion()
+    label, tg, started = run(tap(f"why:{JID}:senior"), notion)
+    assert label == "why" and started == [] and tg.sent == []
+    assert notion.updates[-1] == {"Skip reason": {"select": {"name": "too senior"}}}
+
+
+def test_unknown_skip_reason_is_ignored():
+    notion = FakeNotion()
+    assert run(tap(f"why:{JID}:nonsense"), notion)[0] == "ignored" and notion.updates == []
+
+
+def _with_fit(page, fit):
+    page["properties"]["Fit score"] = {"type": "number", "number": fit}
+    page["properties"]["Score"] = {"type": "number", "number": 80}
+    return page
+
+
+def test_jobs_list_hides_fit_below_50_keeps_unscored_legacy():
+    notion = FakeNotion()
+    low, ok, legacy = _page(title="Low"), _page(title="Good"), _page(title="Legacy")
+    _with_fit(low, 42), _with_fit(ok, 72)
+    legacy["properties"]["Score"] = {"type": "number", "number": 60}
+    notion.open_jobs = [low, ok, legacy]
+    _, tg, _ = run(msg("jobs 40"), notion)
+    assert "Good" in tg.sent[0][0] and "Legacy" in tg.sent[0][0] and "Low" not in tg.sent[0][0]
+    assert "Fit 72" in tg.sent[0][0]
