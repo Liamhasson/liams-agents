@@ -6,6 +6,8 @@ job's research notes — never invented.
 
 from __future__ import annotations
 
+import json
+
 from dataclasses import dataclass, field
 
 from shared.notion import NotionClient
@@ -70,6 +72,7 @@ class EditorContext:
     never_again: list[NeverAgain] = field(default_factory=list)
     references: list[Reference] = field(default_factory=list)
     brief: str = ""  # the Director's brief: sets the angle, is never a source of facts
+    form_questions: list = field(default_factory=list)  # where the hiring tool publishes them
 
 
 def _private_page_id(notion: NotionClient) -> str | None:
@@ -158,4 +161,5 @@ def build_context(notion: NotionClient, job_page: dict) -> EditorContext:
         never_again=load_never_again(notion),
         references=load_references(notion),
         brief=plain_text(job_page, "Director brief"),
+        form_questions=json.loads(plain_text(job_page, "Form questions") or "[]"),
     )
