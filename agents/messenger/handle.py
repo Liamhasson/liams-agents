@@ -14,11 +14,12 @@ from __future__ import annotations
 import html
 import os
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Callable, Optional
 
 import httpx
 
+from shared.assets import LABELS, find, load_assets, set_state
 from shared.notion.client import _long_rt, _title, plain_number, plain_select, plain_text, plain_title
 from .compose import details_text
 
@@ -30,6 +31,9 @@ GREETINGS = {"/start", "start", "hi", "hello", "hey", "/help", "help"}
 
 JOBS_COMMAND = re.compile(r"^/?(?:show |open |my )?jobs(?: (\d{1,3}))?\??$")
 JOBS_SHOWN = 8
+READY_STATUSES = ("Briefed", "Drafting")
+HELP_WORDS = {"/start", "/help", "help"}
+BOOT_MINUTES = 5  # the chat counts as live while GitHub starts it up, so a second text doesn't start another
 SKIP_REASONS = {"senior": "too senior", "field": "wrong field", "ad": "ad work",
                 "location": "location", "other": "other"}
 
@@ -54,7 +58,7 @@ HELP = ("Here's what I understand:\n"
         "• Tap <b>Brief me</b>, <b>Skip</b> or <b>Tell me more</b> on a job.\n"
         "• Or reply <b>apply</b>, <b>skip</b> or <b>more</b> to a job message.\n"
         "• Send <b>jobs</b> to see your open matches (or <b>jobs 60</b> for a lower score).\n"
-        "• While we're writing an application together, just talk to me normally.")
+        "• When a brief is waiting, text me normally to start working on it.")
 
 
 def now_iso() -> str:
@@ -112,6 +116,7 @@ class Handler:
         self.tg, self.notion, self.chat = tg, notion, chat
         self.jobs_db, self.inbox_db = ids["Jobs"], ids.get("Inbox")
         self.start_director, self.start_editor = start_director, start_editor
+        self.ids = ids
 
     # ---- entry point ------------------------------------------------------
     def handle(self, update: dict) -> str:
@@ -217,7 +222,101 @@ class Handler:
             return "more"
         if action in ("resume", "brief"):
             return self._resume(page)
+        if action == "start":
+            return self._start_button(page, arg)
+        if action == "skipasset":
+            return self._skip_asset(page, arg)
+        if action == "pick":
+            return self._pick(page)
+        if action == "restore":
+            return self._restore(page)
         return "ignored"
+
+    # ---- the Editor --------------------------------------------------------
+    def ready_jobs(self) -> list[dict]:
+        """Jobs that have a brief and are waiting on Liam to work on them."""
+        return self.notion.query_database(self.jobs_db, {"or": [
+            {"property": "Status", "select": {"equals": s}} for s in READY_STATUSES]})
+
+    def _start_chat(self, page: dict, text: str, update_id) -> str:
+        """Keep the message, mark the chat live, then start the Editor. Its first job is to answer this."""
+        title = plain_title(page)
+        if text:
+            self._to_inbox(text, page["id"], update_id)
+        return self._launch(page, title)
+
+    def _launch(self, page: dict, title: str) -> str:
+        until = datetime.now(timezone.utc) + timedelta(minutes=BOOT_MINUTES)
+        self.notion.update_page(page["id"], {"Session until": {"date": {"start": until.isoformat(timespec="seconds")}}})
+        err = self.start_editor(page["id"].replace("-", ""))
+        if err:
+            self.notion.update_page(page["id"], {"Session until": {"date": None}})
+            self.tg.send_message(self.chat, f"⚠️ Couldn't start the Editor for <b>{html.escape(title)}</b>: "
+                                            f"{html.escape(err)}\nYour message is saved, so nothing is lost.")
+            return "editor-failed"
+        self.tg.send_message(self.chat, "Starting the Editor. First reply in about a minute and a half.")
+        return "editor-started"
+
+    def _brief_replied_to(self, msg: dict) -> Optional[dict]:
+        reply = msg.get("reply_to_message")
+        if not reply:
+            return None
+        rows = self.notion.query_database(self.jobs_db, {
+            "property": "Brief message id", "number": {"equals": reply["message_id"]}})
+        return rows[0] if rows else None
+
+    def _text_to_editor(self, msg: dict, card: Optional[dict], raw: str, update_id) -> Optional[str]:
+        """Start the Editor from a text. None when no job is waiting."""
+        replied = self._brief_replied_to(msg) or (card if card and plain_select(card, "Status") in READY_STATUSES else None)
+        if replied:
+            return self._start_chat(replied, raw, update_id)
+        ready = self.ready_jobs()
+        if len(ready) == 1:
+            return self._start_chat(ready[0], raw, update_id)
+        if not ready:
+            return None
+        self._to_inbox(raw, "", update_id)  # kept until Liam says which job it's for
+        buttons = [[(plain_title(p)[:40], f"pick:{p['id'].replace('-', '')}")] for p in ready[:8]]
+        self.tg.send_message(self.chat, "Which one is this about?", buttons)
+        return "editor-choose"
+
+    def _pick(self, page: dict) -> str:
+        waiting = self.notion.query_database(self.inbox_db, {"and": [
+            {"property": "Read", "checkbox": {"equals": False}},
+            {"property": "Job", "rich_text": {"is_empty": True}},
+        ]})
+        for row in waiting:
+            self.notion.update_page(row["id"], {"Job": _long_rt(page["id"])})
+        return self._launch(page, plain_title(page))
+
+    def _start_button(self, page: dict, kind: str) -> str:
+        request = f"Start with the {LABELS.get(kind, kind)}."
+        live = self.live_session_job()
+        if live and live["id"] == page["id"]:
+            self._to_inbox(request, page["id"], None)
+            return "inbox"
+        if live:
+            self.tg.send_message(self.chat, "You're in another chat right now. It closes after 15 quiet minutes, "
+                                            "then tap this again.")
+            return "busy"
+        return self._start_chat(page, request, None)
+
+    def _skip_asset(self, page: dict, kind: str) -> str:
+        asset = find(load_assets(self.notion, self.ids["Assets"], page["id"]), kind)
+        if asset is None:
+            return "ignored"
+        set_state(self.notion, asset, "skipped")
+        self.tg.send_message(self.chat, f"Skipped the {html.escape(LABELS.get(kind, kind))}. The rest of this application stays open.")
+        return "asset-skipped"
+
+    def _restore(self, page: dict) -> str:
+        title = plain_title(page)
+        if plain_select(page, "Status") != "Skipped":
+            self.tg.send_message(self.chat, f"<b>{html.escape(title)}</b> isn't dropped.")
+            return "already"
+        self.notion.update_page(page["id"], {"Status": {"select": {"name": "Briefed"}}})
+        self.tg.send_message(self.chat, f"<b>{html.escape(title)}</b> is back. Text me to carry on.")
+        return "restored"
 
     def _resume(self, page: dict) -> str:
         title = plain_title(page)
@@ -251,6 +350,13 @@ class Handler:
                 return "not-text"
             self._to_inbox(raw, live["id"], update_id)
             return "inbox"
+        if text in HELP_WORDS:
+            self.tg.send_message(self.chat, "Hi Liam 👋 Matched design jobs arrive here.\n\n" + HELP)
+            return "greeting"
+        if raw:
+            started = self._text_to_editor(msg, card, raw, update_id)
+            if started:
+                return started
         if card:
             self.tg.send_message(self.chat, "Reply <b>apply</b>, <b>skip</b> or <b>more</b>, or use the buttons.")
             return "reply-help"

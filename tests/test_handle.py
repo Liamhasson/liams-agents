@@ -11,7 +11,7 @@ from agents.messenger import handle
 from agents.messenger.handle import handle_update
 
 CHAT = "42"
-IDS = {"Jobs": "jobs", "Inbox": "inbox"}
+IDS = {"Jobs": "jobs", "Inbox": "inbox", "Assets": "assets"}
 JID = "407be63a05ad8160bb8fed832bc3d9c2"
 PAGE_ID = "407be63a-05ad-8160-bb8f-ed832bc3d9c2"
 
@@ -40,9 +40,15 @@ class FakeTelegram:
 class FakeNotion:
     """Jobs + Inbox in memory. `live` = the job a Writer session is running for."""
 
-    def __init__(self, page=None, live=None, card_for=None, waiting=()):
+    def __init__(self, page=None, live=None, card_for=None, waiting=(), ready=(), brief_for=None, orphans=()):
         self.page, self.live, self.card_for, self.waiting = page or _page(), live, card_for, list(waiting)
-        self.updates, self.created, self.open_jobs = [], [], []
+        self.ready, self.brief_for, self.orphans = list(ready), brief_for, list(orphans)
+        self.updates, self.created, self.open_jobs, self.windows = [], [], [], []
+        self.asset_rows = [{"id": "row-cv", "properties": {
+            "Job": {"type": "rich_text", "rich_text": [{"plain_text": PAGE_ID}]},
+            "Kind": {"type": "select", "select": {"name": "cv"}},
+            "State": {"type": "select", "select": {"name": "needed"}},
+            "Label": {"type": "rich_text", "rich_text": [{"plain_text": "CV"}]}}}]
 
     def get_page(self, page_id):
         assert page_id == PAGE_ID
@@ -50,6 +56,8 @@ class FakeNotion:
 
     def update_page(self, page_id, props):
         self.updates.append(props)
+        if "Session until" in props:
+            self.windows.append(props["Session until"]["date"])
         if "Status" in props:
             self.page["properties"]["Status"]["select"]["name"] = props["Status"]["select"]["name"]
 
@@ -59,6 +67,14 @@ class FakeNotion:
     def query_database(self, db, filter=None):
         if filter.get("property") == "Session until":
             return [self.live] if self.live else []
+        if filter.get("property") == "Brief message id":
+            return [self.page] if filter["number"]["equals"] == self.brief_for else []
+        if filter.get("property") == "Job":
+            return self.asset_rows
+        if "is_empty" in str(filter) and "Read" in str(filter):
+            return self.orphans
+        if "Briefed" in str(filter):
+            return self.ready
         if filter.get("property") == "Telegram message id":
             return [self.page] if filter["number"]["equals"] == self.card_for else []
         if "Score" in str(filter):
@@ -298,3 +314,133 @@ def test_jobs_list_hides_fit_below_50_keeps_unscored_legacy():
     _, tg, _ = run(msg("jobs 40"), notion)
     assert "Good" in tg.sent[0][0] and "Legacy" in tg.sent[0][0] and "Low" not in tg.sent[0][0]
     assert "Fit 72" in tg.sent[0][0]
+
+
+def _ready(status="Briefed", title="Designer", pid=PAGE_ID):
+    p = _page(status=status, title=title)
+    p["id"] = pid
+    return p
+
+
+OTHER_ID = "11111111-05ad-8160-bb8f-ed832bc3d9c2"
+
+
+def _inbox_text(notion, i=0):
+    return notion.created[i][1]["Full text"]["rich_text"][0]["text"]["content"]
+
+
+def _inbox_job(notion, i=0):
+    rich = notion.created[i][1]["Job"]["rich_text"]
+    return rich[0]["text"]["content"] if rich else ""
+
+
+def test_text_starts_editor_for_the_one_waiting_job():
+    notion = FakeNotion(ready=[_ready()])
+    label, tg, _ = run(msg("Let's start with the CV"), notion)
+    assert label == "editor-started" and notion.editor_started == [JID]
+    assert _inbox_text(notion) == "Let's start with the CV" and _inbox_job(notion) == PAGE_ID
+    assert notion.windows and notion.windows[0]["start"] > handle.now_iso()
+    assert "minute and a half" in tg.sent[-1][0]
+
+
+def test_second_text_during_boot_starts_nothing():
+    notion = FakeNotion(live=_ready())
+    label, _, _ = run(msg("and make it short"), notion)
+    assert label == "inbox" and notion.editor_started == []
+    assert _inbox_text(notion) == "and make it short"
+
+
+def test_message_is_saved_before_the_run_starts():
+    notion = FakeNotion(ready=[_ready()])
+    saved_when_started = []
+    run(msg("go"), notion, editor=lambda job: saved_when_started.append(len(notion.created)))
+    assert saved_when_started == [1]
+
+
+def test_drafting_job_can_be_resumed_by_text():
+    notion = FakeNotion(ready=[_ready(status="Drafting")])
+    assert run(msg("carry on"), notion)[0] == "editor-started"
+
+
+def test_expired_window_starts_a_new_run():
+    notion = FakeNotion(live=None, ready=[_ready(status="Drafting")])
+    assert run(msg("are you there"), notion)[0] == "editor-started" and notion.editor_started == [JID]
+
+
+def test_reply_to_a_brief_picks_that_job():
+    notion = FakeNotion(page=_ready(), brief_for=900, ready=[_ready(), _ready(title="Other", pid=OTHER_ID)])
+    label, _, _ = run(msg("start with the letter", reply_to=900), notion)
+    assert label == "editor-started" and notion.editor_started == [JID]
+
+
+def test_several_waiting_gives_buttons_and_keeps_text():
+    notion = FakeNotion(ready=[_ready(title="One"), _ready(title="Two", pid=OTHER_ID)])
+    label, tg, _ = run(msg("start the cv"), notion)
+    assert label == "editor-choose" and notion.editor_started == []
+    assert _inbox_job(notion) == "" and _inbox_text(notion) == "start the cv"
+    assert tg.sent[-1][1][0] == [("One", f"pick:{JID}")]
+
+
+def test_pick_files_the_waiting_message_and_starts():
+    orphan = {"id": "orphan-1"}
+    notion = FakeNotion(page=_ready(), orphans=[orphan])
+    label, _, _ = run(tap(f"pick:{JID}"), notion)
+    assert label == "editor-started" and notion.editor_started == [JID]
+    assert notion.updates[0]["Job"]["rich_text"][0]["text"]["content"] == PAGE_ID
+
+
+def test_no_job_waiting_gives_help():
+    label, tg, _ = run(msg("hello?"), FakeNotion())
+    assert label == "help" and tg.sent
+
+
+def test_failed_dispatch_clears_window_keeps_message_and_says_why():
+    notion = FakeNotion(ready=[_ready()])
+    label, tg, _ = run(msg("go"), notion, editor=lambda job: "GitHub said 403: nope")
+    assert label == "editor-failed" and notion.windows[-1] is None
+    assert len(notion.created) == 1 and "403" in tg.sent[-1][0]
+
+
+def test_greeting_still_works_with_a_job_waiting():
+    assert run(msg("/help"), FakeNotion(ready=[_ready()]))[0] == "greeting"
+
+
+def test_jobs_command_still_answered_mid_session():
+    notion = FakeNotion(live=_ready())
+    assert run(msg("jobs 55"), notion)[0] == "jobs-none" and notion.created == []
+
+
+def test_start_button_saves_request_and_starts():
+    notion = FakeNotion(page=_ready())
+    label, _, _ = run(tap(f"start:{JID}:cv"), notion)
+    assert label == "editor-started" and _inbox_text(notion) == "Start with the CV."
+
+
+def test_start_button_during_that_jobs_chat_goes_to_the_chat():
+    notion = FakeNotion(page=_ready(), live=_ready())
+    label, _, _ = run(tap(f"start:{JID}:cv"), notion)
+    assert label == "inbox" and notion.editor_started == []
+
+
+def test_start_button_during_another_chat_says_so():
+    notion = FakeNotion(page=_ready(), live=_ready(pid=OTHER_ID))
+    label, tg, _ = run(tap(f"start:{JID}:cv"), notion)
+    assert label == "busy" and notion.editor_started == [] and "another" in tg.sent[-1][0]
+
+
+def test_skip_button_needs_no_session():
+    notion = FakeNotion(page=_ready())
+    label, tg, _ = run(tap(f"skipasset:{JID}:cv"), notion)
+    assert label == "asset-skipped" and notion.editor_started == []
+    assert notion.updates[-1] == {"State": {"select": {"name": "skipped"}}}
+    assert "CV" in tg.sent[-1][0]
+
+
+def test_restore_returns_a_dropped_job_to_briefed():
+    notion = FakeNotion(page=_ready(status="Skipped"))
+    label, _, _ = run(tap(f"restore:{JID}"), notion)
+    assert label == "restored" and notion.page["properties"]["Status"]["select"]["name"] == "Briefed"
+
+
+def test_restore_only_touches_a_skipped_job():
+    assert run(tap(f"restore:{JID}"), FakeNotion(page=_ready(status="Applied")))[0] == "already"
