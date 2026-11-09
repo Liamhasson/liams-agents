@@ -9,6 +9,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from agents.matcher.score import (route, is_hard_drop, avoided_industry, assess_ghost, freshness, adjust, age_points,
                                   onsite_outside_berlin, written_in_german)
+from agents.matcher.asks import verified_asks
+from agents.matcher.score import SCHEMA, SYSTEM
 from shared.notion.client import _long_rt
 
 ALERT, ASK = 70, 40
@@ -69,8 +71,54 @@ def score_of(job, age=0):
 
 def test_berlin_roles_get_the_bonus_and_others_dont():
     assert score_of(_j(55, remote="berlin")) == 65
-    assert score_of(_j(95, remote="berlin")) == 100
     assert score_of(_j(55)) == 55
+
+
+def test_score_no_longer_capped():
+    assert score_of(_j(95, remote="berlin")) == 105
+
+
+def test_fit_below_50_never_sent():
+    r = {**_j(40), "score": 95, "fit": 49}
+    assert route(r, ALERT, ASK, {**RULES, "min_fit": 50}) == ("dropped", "fit below 50")
+
+
+def test_fit_50_still_routes():
+    assert route({**_j(50), "score": 95, "fit": 50}, ALERT, ASK, {**RULES, "min_fit": 50})[0] == "alert"
+
+
+def test_borderline_is_also_held_back_below_min_fit():
+    assert route({**_j(45), "score": 50, "fit": 45}, ALERT, ASK, {**RULES, "min_fit": 50})[0] == "dropped"
+
+
+def test_hard_rules_still_named_first_when_fit_is_low():
+    r = {**_j(30), "score": 30, "fit": 30, "german_required": "fluent"}
+    assert route(r, ALERT, ASK, {**RULES, "min_fit": 50}) == ("dropped", "requires German")
+
+
+def test_stated_years_still_penalised():
+    assert score_of(_j(80, years=5)) == 80 - 20
+
+
+def test_verified_asks_drop_invented_quote():
+    raw = [{"kind": "loom_or_video", "state": "required", "quote": "Record a Loom"},
+           {"kind": "cover_letter", "state": "required", "quote": "Attach a cover letter"}]
+    assert [a["kind"] for a in verified_asks(raw, "Please record a Loom of your work.")] == ["loom_or_video"]
+
+
+def test_verified_asks_handles_nothing():
+    assert verified_asks([], "Any post.") == []
+    assert verified_asks(None, "Any post.") == []
+
+
+def test_prompt_never_lowers_fit_for_a_title():
+    assert "Never lower the score because of a Senior" in SYSTEM
+    assert "AND level" not in SYSTEM
+
+
+def test_schema_asks_for_application_asks_and_ad_work():
+    assert "application_asks" in SCHEMA["properties"] and "ad_work_quote" in SCHEMA["properties"]
+    assert {"application_asks", "ad_work_quote"} <= set(SCHEMA["required"])
 
 
 def test_favourite_fields_score_higher_and_others_are_untouched():
@@ -163,16 +211,14 @@ def test_ghost_fresh_specific_stays_low():
     assert risk == "low" and reasons == []
 
 
-def test_ghost_age_bumps_risk():
-    # first seen ~210 days ago, content said low -> age pushes to high
+def test_age_alone_is_not_ghost():
+    # posted and first seen ~210 days ago, but the text is concrete
     risk, reasons = assess_ghost("low", "2026-04-01", "2026-04-01", "2026-10-28")
-    assert risk == "high" and any(("seen for" in r or "posted" in r) for r in reasons)
+    assert risk == "low" and reasons == []
 
 
-def test_ghost_moderate_age_is_medium_not_high():
-    # ~100 days -> medium under the softened thresholds, not high
-    risk, _ = assess_ghost("low", "2026-07-20", "2026-07-20", "2026-10-28")
-    assert risk == "medium"
+def test_vague_text_still_flags_an_old_post():
+    assert assess_ghost("medium", "2026-04-01", "2026-04-01", "2026-10-28")[0] == "medium"
 
 
 def test_freshness_tiers():

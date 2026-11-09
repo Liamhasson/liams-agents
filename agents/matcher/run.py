@@ -12,6 +12,7 @@ score thresholds, and writes the result back to Notion.
 from __future__ import annotations
 
 import argparse
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -20,8 +21,10 @@ import yaml
 from shared import usage
 from shared.claude import Claude
 from shared.notion import NotionClient
-from shared.notion.client import plain_title, plain_text, plain_select, plain_date
+from shared.notion.client import _long_rt, plain_title, plain_text, plain_select, plain_date
 from shared.notion.schema import ROLE_TYPES
+from shared.quotes import appears_in
+from .asks import verified_asks
 from .profile import load_profile
 from .score import (score, route, is_hard_drop, avoided_industry, assess_ghost, freshness, adjust, age_points,
                     onsite_outside_berlin, written_in_german)
@@ -38,7 +41,9 @@ def _cfg() -> dict:
 
 
 def run(limit: int | None = None, rescore: bool = False, dry_run: bool = False,
-        all_jobs: bool = False) -> dict:
+        all_jobs: bool = False, sent: bool = False) -> dict:
+    if sent and not dry_run:
+        raise SystemExit("--sent is for dry runs only: a real re-score would reset job statuses.")
     cfg = _cfg()
     alert = int(cfg.get("alert_threshold", 70))
     ask = int(cfg.get("ask_threshold", 40))
@@ -55,7 +60,9 @@ def run(limit: int | None = None, rescore: bool = False, dry_run: bool = False,
     profile = load_profile(notion)
     claude = Claude()
 
-    if all_jobs:
+    if sent:
+        flt = {"property": "Telegram message id", "number": {"is_not_empty": True}}
+    elif all_jobs:
         flt = None  # re-score everything, regardless of status
     elif rescore:
         flt = {"property": "Status", "select": {"equals": "New"}}
@@ -83,7 +90,7 @@ def run(limit: int | None = None, rescore: bool = False, dry_run: bool = False,
         posted = plain_date(page, "Posted at")
         priority = freshness(posted, now_iso)
         ghost_risk, ghost_reason = "low", ""
-        fit, breakdown = None, []
+        fit, base, breakdown = None, None, []
         # Deterministic hard drops — each saves a Claude call.
         avoided = avoided_industry(title, company, desc, cfg.get("avoid_industries", {}))
         if is_hard_drop(title, desc, hard_drops):
@@ -124,7 +131,9 @@ def run(limit: int | None = None, rescore: bool = False, dry_run: bool = False,
             # Ghost is a warning only — it never changes the score.
             age = age_points(posted, now_iso, age_table, age_after)
             fit = int(res["score"])
+            base = adjust(res, cfg, 0)[0]  # kept so the daily refresh can redo the age points
             res["score"], breakdown = adjust(res, cfg, age)
+            res["fit"] = fit
             sc = int(res["score"])
             decision, reason = route(res, alert, ask, cfg)
 
@@ -137,6 +146,11 @@ def run(limit: int | None = None, rescore: bool = False, dry_run: bool = False,
         summary = res["fit_summary"]
         if reason:
             summary = f"[dropped: {reason}] {summary}".strip()
+
+        asks = verified_asks(res.get("application_asks"), desc)
+        ad_quote = res.get("ad_work_quote", "")
+        ad_work = ad_quote if appears_in(ad_quote, desc) else ""
+        res["verified_asks"], res["ad_work"] = asks, ad_work
 
         counts[decision] += 1
         results.append((sc, decision, title, company, flags, res, reason, priority))
@@ -153,6 +167,9 @@ def run(limit: int | None = None, rescore: bool = False, dry_run: bool = False,
                 "Field": {"select": {"name": res.get("field") or "other"}},
                 "Years required": {"number": int(res.get("years_required") or 0)},
                 "Fit score": {"number": fit},
+                "Base score": {"number": base},
+                "Application asks": _long_rt(json.dumps(asks, ensure_ascii=False)),
+                "Ad work": _rt(ad_work),
                 "Score breakdown": _rt(" · ".join(breakdown)),
                 "Priority": {"select": {"name": priority}},
                 "Ghost risk": {"select": {"name": ghost_risk}},
@@ -192,6 +209,10 @@ def _print_report(results: list) -> None:
         if reason:
             extra.append(reason)
         print(line + ("   " + " · ".join(extra) if extra else ""))
+        if res.get("fit") is not None:
+            asks = ", ".join(f"{a['kind']} ({a['state']})" for a in res.get("verified_asks", [])) or "not stated"
+            print(f"      fit {res['fit']} · field {res.get('field')} · asks: {asks}"
+                  + (f" · AD WORK: {res['ad_work'][:70]}" if res.get("ad_work") else ""))
 
 
 if __name__ == "__main__":
@@ -200,5 +221,7 @@ if __name__ == "__main__":
     ap.add_argument("--rescore", action="store_true", help="re-score New jobs even if already scored")
     ap.add_argument("--all", action="store_true", dest="all_jobs", help="re-score every job regardless of status")
     ap.add_argument("--dry-run", action="store_true", help="print, write nothing")
+    ap.add_argument("--sent", action="store_true", help="only jobs already sent to Liam (dry runs only)")
     args = ap.parse_args()
-    run(limit=args.limit, rescore=args.rescore, dry_run=args.dry_run, all_jobs=args.all_jobs)
+    run(limit=args.limit, rescore=args.rescore, dry_run=args.dry_run, all_jobs=args.all_jobs,
+        sent=args.sent)

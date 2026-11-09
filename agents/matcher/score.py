@@ -6,6 +6,7 @@ import re
 
 from shared.claude import Claude
 from shared.notion.schema import ROLE_TYPES, JOB_FLAGS, FIELDS
+from .asks import ASK_ITEM_SCHEMA, ASKS_RULES
 
 DISCIPLINES = ["product", "brand", "graphic/visual"]
 
@@ -30,9 +31,12 @@ SCHEMA = {
         "ghost_risk": {"type": "string", "enum": ["low", "medium", "high"],
                        "description": "Likelihood this is an evergreen/ghost post, from the text."},
         "ghost_reason": {"type": "string", "description": "One short phrase; '' if low."},
+        "application_asks": {"type": "array", "items": ASK_ITEM_SCHEMA},
+        "ad_work_quote": {"type": "string", "description": "The post's exact words if ad work is part of the role, else ''."},
     },
     "required": ["score", "role_type", "field", "fit_summary", "why_you", "gaps", "flags",
-                 "years_required", "discipline", "german_required", "remote_eligibility", "ghost_risk", "ghost_reason"],
+                 "years_required", "discipline", "german_required", "remote_eligibility", "ghost_risk", "ghost_reason",
+                 "application_asks", "ad_work_quote"],
 }
 
 SYSTEM = """You score design jobs for Liam Hasson against his profile below.
@@ -43,13 +47,15 @@ Be a sharp, honest filter — not a cheerleader. Use the full 0-100 range.
 === END PROFILE ===
 
 Scoring guidance:
-- 70-100: clearly fits his role types AND level AND location AND language.
+- 70-100: clearly fits his role types AND location AND language.
 - 40-69: adjacent or partial mismatch (unclear remote eligibility, only loosely
   a design role) — worth asking Liam about.
 - 0-39: wrong field, requires German, or not hirable in Germany.
 - Score the fit only. Don't add points for Berlin or the company's field, and
   don't take points off for the years of experience asked: those adjustments are
   made afterwards from years_required.
+- Never lower the score because of a Senior, Lead or Principal title. Judge fit on
+  the work the post describes. Years are handled afterwards.
 
 Rules:
 - german_required: 'fluent' whenever German is REQUIRED at any level (e.g.
@@ -68,7 +74,8 @@ Rules:
   environment); 'animals' (pets, vets, wildlife); 'innovative tech' only when the
   product itself is new technology (AI models or agents, robotics, space, new
   hardware, deep tech); 'cyber' (cybersecurity, defence tech). Software tools,
-  productivity, finance, B2B SaaS and marketplaces are 'other', even if they use AI.
+  developer tools, data platforms, productivity, finance, banking, crypto, trading,
+  B2B SaaS and marketplaces are 'other', even if they use AI.
 - years_required: the minimum years of design experience (product, UX, UI,
   visual, brand) the post asks for, as a number. "5+ years" -> 5; "3-5 years" -> 3;
   "at least 4 years" -> 4. 0 if the post states no number, even for a senior title.
@@ -85,6 +92,7 @@ Rules:
   a generic blurb with no concrete team, responsibilities or project. MEDIUM:
   somewhat vague or boilerplate. LOW: a specific, concrete role. Put the tell in
   ghost_reason. This does NOT lower the score — it is a separate warning.
+""" + ASKS_RULES + """
 Return your answer by calling the submit_match tool."""
 
 
@@ -128,37 +136,18 @@ def freshness(posted_at: str, now_iso: str) -> str:
 
 
 def assess_ghost(llm_risk: str, first_seen_at: str, posted_at: str, now_iso: str) -> tuple[str, list[str]]:
-    """Merge the content-based ghost risk with behavioural signals (age/repost).
+    """Ghost risk from the post's text and from reposting. Returns (risk, reasons).
 
-    Returns (risk, reasons). Behavioural signals strengthen over time as the
-    Hunter keeps seeing the same posting.
+    Age alone isn't evidence: some real roles stay open for months, so the job
+    card shows how old a post is as a plain fact instead.
     """
     risk = llm_risk if llm_risk in _RISK_ORDER else "low"
     reasons: list[str] = []
-
-    def bump(level: str):
-        nonlocal risk
-        if _RISK_ORDER[level] > _RISK_ORDER[risk]:
-            risk = level
-
-    first, posted, now = _to_date(first_seen_at), _to_date(posted_at), _to_date(now_iso)
-    # How long the role itself has been posted (noisy ATS dates -> high thresholds).
-    if posted and now:
-        pa = (now - posted).days
-        if pa >= 180:
-            bump("high"); reasons.append(f"posted ~{pa}d ago")
-        elif pa >= 90:
-            bump("medium"); reasons.append(f"posted ~{pa}d ago")
-    # How long WE have been seeing it (accrues as the Hunter runs over time).
-    if first and now:
-        age = (now - first).days
-        if age >= 180:
-            bump("high"); reasons.append(f"seen for ~{age}d")
-        elif age >= 90:
-            bump("medium"); reasons.append(f"seen for ~{age}d")
+    first, posted = _to_date(first_seen_at), _to_date(posted_at)
     # Posting date refreshed well after we first saw it -> classic repost.
     if first and posted and (posted - first).days >= 14:
-        bump("high"); reasons.append("posting date refreshed (likely reposted)")
+        risk = "high"
+        reasons.append("posting date refreshed (likely reposted)")
     return risk, reasons
 
 
@@ -193,6 +182,9 @@ def route(result: dict, alert: int, ask: int, rules: dict | None = None) -> tupl
         return "dropped", "not Berlin / not hirable in Germany"
     if rules and "experience_max_gap" in rules and years_gap(result, rules) > int(rules["experience_max_gap"]):
         return "dropped", f"asks for {result.get('years_required')}+ years of experience"
+    min_fit = (rules or {}).get("min_fit")
+    if min_fit is not None and result.get("fit") is not None and int(result["fit"]) < int(min_fit):
+        return "dropped", f"fit below {int(min_fit)}"
     sc = int(result["score"])
     if sc < ask:
         return "dropped", f"low score ({sc})"
@@ -223,7 +215,8 @@ def years_gap(result: dict, rules: dict) -> int:
 def adjust(result: dict, rules: dict, age: int = 0) -> tuple[int, list[str]]:
     """Claude's fit score plus Liam's bonuses (Berlin, product design, favourite field,
     a fresh post) and minus the penalties (an old post, years beyond his). Bonuses only
-    go to jobs that already fit. Returns the 0-100 score and how it was made up."""
+    go to jobs that already fit. Returns the score and how it was made up. It isn't capped,
+    so strong jobs keep their order."""
     fit = int(result["score"])
     parts = [("fit", fit)]
     if fit >= int(rules.get("bonus_min_fit", 0)):
@@ -244,7 +237,7 @@ def adjust(result: dict, rules: dict, age: int = 0) -> tuple[int, list[str]]:
               default=0)
     parts.append((f"asks {result.get('years_required')} yrs", -off))
     parts = [(label, pts) for label, pts in parts if pts or label == "fit"]
-    total = max(0, min(100, sum(pts for _, pts in parts)))
+    total = max(0, sum(pts for _, pts in parts))
     return total, [f"fit {fit}"] + [f"{label} {pts:+d}" for label, pts in parts[1:]]
 
 
@@ -290,5 +283,5 @@ def score(claude: Claude, profile: str, *, title: str, company: str,
         user=user,
         schema=SCHEMA,
         tool_name="submit_match",
-        max_tokens=800,
+        max_tokens=1400,
     )
