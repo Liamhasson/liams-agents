@@ -19,8 +19,8 @@ from typing import Callable, Optional
 
 import httpx
 
-from shared.assets import LABELS, find, load_assets, set_state
-from shared.notion.client import _long_rt, _title, plain_number, plain_select, plain_text, plain_title
+from shared.assets import LABELS, checklist_message, find, is_complete, load_assets, set_state
+from shared.notion.client import _long_rt, _title, plain_number, plain_select, plain_text, plain_title, plain_url
 from .compose import details_text
 
 # A decision is only valid while the job is still awaiting Liam.
@@ -31,7 +31,7 @@ GREETINGS = {"/start", "start", "hi", "hello", "hey", "/help", "help"}
 
 JOBS_COMMAND = re.compile(r"^/?(?:show |open |my )?jobs(?: (\d{1,3}))?\??$")
 JOBS_SHOWN = 8
-READY_STATUSES = ("Briefed", "Drafting")
+READY_STATUSES = ("Briefed", "Drafting", "Ready to send")
 HELP_WORDS = {"/start", "/help", "help"}
 BOOT_MINUTES = 5  # the chat counts as live while GitHub starts it up, so a second text doesn't start another
 SKIP_REASONS = {"senior": "too senior", "field": "wrong field", "ad": "ad work",
@@ -272,6 +272,8 @@ class Handler:
         replied = self._brief_replied_to(msg) or (card if card and plain_select(card, "Status") in READY_STATUSES else None)
         if replied:
             return self._start_chat(replied, raw, update_id)
+        if card:
+            return None  # a reply to a job with no brief isn't about whichever job happens to be waiting
         ready = self.ready_jobs()
         if len(ready) == 1:
             return self._start_chat(ready[0], raw, update_id)
@@ -304,11 +306,18 @@ class Handler:
         return self._start_chat(page, request, None)
 
     def _skip_asset(self, page: dict, kind: str) -> str:
-        asset = find(load_assets(self.notion, self.ids["Assets"], page["id"]), kind)
+        assets = load_assets(self.notion, self.ids["Assets"], page["id"])
+        asset = find(assets, kind)
         if asset is None:
             return "ignored"
-        set_state(self.notion, asset, "skipped")
+        updated = set_state(self.notion, asset, "skipped")
         self.tg.send_message(self.chat, f"Skipped the {html.escape(LABELS.get(kind, kind))}. The rest of this application stays open.")
+        assets = [updated if a.kind == kind else a for a in assets]
+        if is_complete(assets) and plain_select(page, "Status") in READY_STATUSES:
+            self.notion.update_page(page["id"], {"Status": {"select": {"name": "Ready to send"}}})
+            url = plain_url(page, "URL") or plain_url(page, "Apply URL")
+            text, buttons = checklist_message(assets, url, page["id"].replace("-", ""))
+            self.tg.send_message(self.chat, text, buttons)
         return "asset-skipped"
 
     def _applied(self, page: dict) -> str:
@@ -361,6 +370,11 @@ class Handler:
             if not raw:
                 self.tg.send_message(self.chat, "I can only read text messages for now.")
                 return "not-text"
+            replied = self._brief_replied_to(msg) or (card if card and plain_select(card, "Status") in READY_STATUSES else None)
+            if replied and replied["id"] != live["id"]:
+                self.tg.send_message(self.chat, f"You're in another chat right now, about <b>{html.escape(plain_title(live))}</b>. "
+                                                "It closes after 15 quiet minutes, then reply here again.")
+                return "busy"
             self._to_inbox(raw, live["id"], update_id)
             return "inbox"
         if text in HELP_WORDS:

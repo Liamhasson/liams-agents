@@ -172,3 +172,31 @@ def test_dry_run_writes_and_sends_nothing():
     n = Notion()
     (result, tg) = _go(n, dry_run=True)
     assert n.updates == [] and n.rows == [] and tg.sent == [] and "What they're after" in result["text"]
+
+
+class FailsOnce(Tg):
+    def __init__(self):
+        super().__init__()
+        self.failed = False
+
+    def send_message(self, chat, text, buttons=None):
+        if not self.failed:
+            self.failed = True
+            raise RuntimeError("Telegram down")
+        return super().send_message(chat, text, buttons)
+
+
+def test_a_failed_send_leaves_no_brief_so_try_again_works():
+    n, tg = Notion(), FailsOnce()
+    with pytest.raises(RuntimeError):
+        _go(n, tg=tg)
+    assert "Director brief" not in n.merged() and "Couldn't" in tg.sent[0][0]
+
+
+def test_long_form_questions_are_stored_whole(monkeypatch):
+    form = [{"label": "Q" * 400, "required": True, "type": "text"} for _ in range(40)]
+    monkeypatch.setattr(director, "_form", lambda page, http: form)
+    n = Notion()
+    _go(n)
+    stored = "".join(p["text"]["content"] for p in n.merged()["Form questions"]["rich_text"])
+    assert json.loads(stored) == form

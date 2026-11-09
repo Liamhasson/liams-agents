@@ -16,7 +16,7 @@ from typing import Callable
 from shared import config, usage
 from shared.assets import create_assets
 from shared.claude import Claude, HAIKU, SONNET
-from shared.notion.client import _long_rt, plain_text, plain_title, plain_url
+from shared.notion.client import _MAX_ASSET, _long_rt, plain_text, plain_title, plain_url
 from agents.matcher.asks import extract_asks
 from .brief import brief_message, plan_assets, verified_brief, write_brief
 from .forms import greenhouse_questions, parse_greenhouse
@@ -54,16 +54,16 @@ def _brief(job_id, *, notion, tg, chat, ids, sonnet, haiku, http, research, sour
     if dry_run:
         return {"text": text, "buttons": buttons, "dropped_points": len(raw.get("why_you", [])) - len(brief["why_you"])}
 
-    props = {"Director brief": _long_rt(text)}
-    if extracted:
-        props["Application asks"] = _long_rt(json.dumps(asks, ensure_ascii=False))
-    if form is not None:
-        props["Form questions"] = _long_rt(json.dumps(form, ensure_ascii=False))
-    notion.update_page(job_id, props)
     create_assets(notion, ids["Assets"], job_id, planned)
     sent = tg.send_message(chat, text, buttons)
-    notion.update_page(job_id, {"Status": {"select": {"name": "Briefed"}},
-                                "Brief message id": {"number": sent["message_id"]}})
+    # Saved last: Try again only works on a job with no brief, so a failure above must leave none.
+    props = {"Director brief": _long_rt(text), "Status": {"select": {"name": "Briefed"}},
+             "Brief message id": {"number": sent["message_id"]}}
+    if extracted:
+        props["Application asks"] = _long_rt(json.dumps(asks, ensure_ascii=False), limit=_MAX_ASSET)
+    if form is not None:
+        props["Form questions"] = _long_rt(json.dumps(form, ensure_ascii=False), limit=_MAX_ASSET)
+    notion.update_page(job_id, props)
     return {"briefed": 1}
 
 

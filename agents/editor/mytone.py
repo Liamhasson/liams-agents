@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from shared.notion import NotionClient
 
 
@@ -30,3 +32,11 @@ def append_correction(notion: NotionClient, line: str) -> None:
     children = [] if CORRECTIONS_HEADING in notion.page_text(pid) else [_block("paragraph", CORRECTIONS_HEADING)]
     children.append(_block("bulleted_list_item", line))
     notion._request("PATCH", f"/blocks/{pid}/children", {"children": children})
+
+
+_REJECTED = re.compile(r'^\[[^\]]*\] (Instead of|About) "')
+
+
+def without_rejected(guide: str) -> str:
+    """The guide minus corrections that quote a line Liam threw out, so a rejected line can never count as proof."""
+    return "\n".join(line for line in guide.splitlines() if not _REJECTED.match(line.strip()))

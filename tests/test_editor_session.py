@@ -139,7 +139,7 @@ def _assets(state="needed", text=""):
 
 @pytest.fixture
 def go(monkeypatch):
-    def run(batches, *, status="Briefed", assets=None, turn=None, actions=None, job=JOB, **kw):
+    def run(batches, *, status="Briefed", assets=None, turn=None, actions=None, job=JOB, context=None, loader=None, **kw):
         n, tg, box = Notion(status), Tg(), FakeInbox(batches)
         seen = {"assets": [], "history": []}
         clock = [datetime(2026, 11, 9, 10, 0, tzinfo=timezone.utc)]
@@ -158,13 +158,13 @@ def go(monkeypatch):
         monkeypatch.setattr(session, "Telegram", lambda: tg)
         monkeypatch.setattr(session, "Claude", lambda model=None: object())
         monkeypatch.setattr(session.config, "require", lambda key: "42")
-        monkeypatch.setattr(session.ctxmod, "build_context", lambda notion, page: _ctx())
+        monkeypatch.setattr(session.ctxmod, "build_context", context or (lambda notion, page: _ctx()))
         def _open(notion, ids, opened):
             seen["job"] = opened
             return box
 
         monkeypatch.setattr(session, "_open_inbox", _open)
-        monkeypatch.setattr(session, "load_assets", lambda notion, db, job: assets if assets is not None else _assets())
+        monkeypatch.setattr(session, "load_assets", lambda notion, db, job: loader() if loader else (assets if assets is not None else _assets()))
         monkeypatch.setattr(session, "restore_history", kw.pop("restore", lambda notion, db, job: []))
         monkeypatch.setattr(session.usage, "log_run", lambda *a: None)
         monkeypatch.setattr(session, "turn", _turn)
@@ -188,18 +188,18 @@ def test_replies_are_logged(go):
 def test_window_rolls_forward_with_each_message(go):
     _, n, *_ = go([["one"], ["two"]])
     live = [w["start"] for w in n.windows if w]
-    assert len(live) >= 3 and live == sorted(live) and len(set(live)) >= 3
+    assert len(live) == 2 and live[0] < live[1]
 
 
 def test_closes_after_idle_and_clears_window(go):
-    result, n, tg, *_ = go([])
+    result, n, tg, *_ = go([["hello"]])
     assert n.windows[-1] is None and result == {"closed": True}
     assert "Text me" in tg.sent[-1][0]
 
 
 def test_final_check_catches_a_last_second_message(go):
-    _, n, tg, box, _ = go([[], ["just in time"]])
-    assert box.read == ["just in time"]
+    _, n, tg, box, _ = go([["first"], [], ["just in time"]])
+    assert box.read == ["first", "just in time"]
 
 
 def test_resume_keeps_drafts_and_history(go):
@@ -220,12 +220,12 @@ def test_crash_leaves_unread_messages_for_next_run(go):
 
 
 def test_status_becomes_drafting_when_briefed(go):
-    _, n, *_ = go([])
+    _, n, *_ = go([["hi"]])
     assert n.updates[0] == {"Status": {"select": {"name": "Drafting"}}}
 
 
 def test_status_is_left_alone_on_a_job_already_applied(go):
-    _, n, *_ = go([], status="Applied")
+    _, n, *_ = go([["hi"]], status="Applied")
     assert n.updates == []
 
 
@@ -255,7 +255,7 @@ def test_stops_at_the_time_limit_and_keeps_the_rest_unread(go):
 
 
 def test_job_id_without_dashes_is_normalised(go):
-    *_, seen = go([], job=JID)
+    *_, seen = go([["hi"]], job=JID)
     assert seen["job"] == JOB
 
 
@@ -279,3 +279,53 @@ def test_checklist_lists_finals_skips_and_link():
     text, _ = session.checklist(env)
     assert "CV: Ready" in text and "Cover letter: Skipped" in text and "Portfolio link: Yours to handle" in text
     assert "https://acme.com/1" in text
+
+
+def test_a_run_with_nothing_to_answer_exits_silently(go):
+    result, n, tg, *_ = go([])
+    assert result == {"nothing": True} and tg.sent == [] and n.updates == [] and n.windows[-1] is None
+
+
+def test_window_rolls_when_a_message_is_picked_up_before_the_work(go):
+    marks = []
+
+    def slow(history):
+        marks.append(len(session.NotionClient().windows))
+        return {"reply": "ok", "actions": []}
+
+    go([["one"], ["two"]], turn=slow)
+    assert marks[0] == 1 and marks[1] == 2
+
+
+def test_window_clears_before_the_last_look(go):
+    _, n, *_ = go([["one"], [], ["late"]])
+    assert None in n.windows[:-1]
+
+
+def test_start_up_failure_is_reported(monkeypatch, go):
+    def broken(notion, page):
+        raise ValueError("bad form json")
+
+    with pytest.raises(ValueError):
+        go([["hi"]], context=broken)
+    assert "Nothing is lost" in session.Telegram().sent[-1][0]
+
+
+def test_status_goes_back_to_drafting_when_a_final_asset_reopens(go):
+    done = [Asset("row", JOB, "cv", "final", "CV", "", "t", "t")]
+
+    def reopen(env, a, m):
+        env.assets[0] = Asset("row", JOB, "cv", "drafted", "CV", "", "t2", "t")
+        return Done()
+
+    _, n, *_ = go([["change it"]], status="Ready to send", assets=done, actions=reopen)
+    assert {"Status": {"select": {"name": "Drafting"}}} in n.updates
+
+
+def test_assets_are_reloaded_each_turn(go, monkeypatch):
+    loads = [_assets("needed"), [Asset("row", JOB, "cv", "skipped", "CV", "", "", "")],
+             [Asset("row", JOB, "cv", "skipped", "CV", "", "", "")]]
+    def next_load():
+        return loads.pop(0) if len(loads) > 1 else loads[0]
+    *_, seen = go([["after skip"]], loader=next_load)
+    assert seen["assets"][0][0].state == "skipped"

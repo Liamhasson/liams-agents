@@ -11,20 +11,19 @@ later with nothing lost. A message is only marked read once it's been dealt with
 from __future__ import annotations
 
 import argparse
-import html
 import sys
 import time
 from datetime import datetime, timedelta, timezone
 
 from shared import config, usage
-from shared.assets import is_complete, load_assets
+from shared.assets import checklist_message, is_complete, load_assets
 from shared.claude import Claude, SONNET
 from shared.notion import NotionClient
 from shared.notion.client import _long_rt, _title, plain_checkbox, plain_date, plain_number, plain_select, plain_text, plain_title
 from shared.telegram import Telegram
 from . import context as ctxmod
 from .act import Env, apply_actions
-from .deliver import split_message
+from .deliver import safe_parts
 from .turn import turn
 
 POLL_SECONDS = 3
@@ -99,25 +98,19 @@ def _window(notion, job_id: str, until) -> None:
 
 
 def _say(env: Env, inbox_db: str, text: str) -> None:
-    for part in split_message(html.escape(text, quote=False)):
+    for part in safe_parts(text):
         env.tg.send_message(env.chat, part)
     log_out(env.notion, inbox_db, env.ctx.job_page_id, text)
 
 
 def checklist(env: Env) -> tuple[str, list]:
-    """What's ready, what's skipped, what's Liam's to do, and the link to apply."""
-    ctx, lines = env.ctx, ["✅ <b>Before you apply</b>", ""]
-    for a in env.assets:
-        mark = {"final": "Ready", "skipped": "Skipped", "optional": "Optional, not written"}.get(a.state, "Yours to handle")
-        lines.append(f"• {html.escape(a.label, quote=False)}: {mark}")
-    if ctx.url:
-        lines += ["", html.escape(ctx.url, quote=False)]
-    lines += ["", "Read each one once more, then tap Applied when you've sent it."]
-    return "\n".join(lines), [[("✅ Applied", f"applied:{ctx.job_page_id.replace('-', '')}")]]
+    return checklist_message(env.assets, env.ctx.url, env.ctx.job_page_id.replace("-", ""))
 
 
 def _answer(env: Env, inbox: Inbox, inbox_db: str, row: dict) -> bool:
     """Deal with one message. Returns True if the application was dropped."""
+    # Reloaded because a Skip button can change an asset while the chat is open.
+    env.assets[:] = load_assets(env.notion, env.ids["Assets"], env.ctx.job_page_id)
     message = inbox.text(row)
     env.history.append({"role": "user", "content": message})
     was_complete = is_complete(env.assets)
@@ -130,10 +123,13 @@ def _answer(env: Env, inbox: Inbox, inbox_db: str, row: dict) -> bool:
     inbox.mark_read(row)
     if done.dropped:
         return True
-    if is_complete(env.assets) and not was_complete:
+    complete = is_complete(env.assets)
+    if complete and not was_complete:
         env.notion.update_page(env.ctx.job_page_id, {"Status": {"select": {"name": "Ready to send"}}})
         text, buttons = checklist(env)
         env.tg.send_message(env.chat, text, buttons)
+    elif was_complete and not complete:
+        env.notion.update_page(env.ctx.job_page_id, {"Status": {"select": {"name": "Drafting"}}})
     return False
 
 
@@ -142,22 +138,24 @@ def _close(env: Env) -> dict:
     return {"closed": True}
 
 
-def _chat(env: Env, inbox: Inbox, inbox_db: str, idle: float, max_seconds: float) -> dict:
+def _chat(env: Env, inbox: Inbox, inbox_db: str, idle: float, max_seconds: float, rows: list[dict]) -> dict:
     job_id = env.ctx.job_page_id
     started = last = time.monotonic()
     while True:
-        rows = inbox.wait(max(0.0, min(50.0, idle - (time.monotonic() - last))))
-        if not rows and (time.monotonic() - last >= idle or time.monotonic() - started >= max_seconds):
-            rows = inbox.wait(0)  # one last look, so a message sent as we close isn't left waiting
-            if not rows:
-                return _close(env)
         for row in rows:
+            # Rolled before the work, because a draft can take minutes and a text during it mustn't start a new run.
+            _window(env.notion, job_id, _now() + timedelta(seconds=idle))
             if _answer(env, inbox, inbox_db, row):
                 return {"dropped": True}
             last = time.monotonic()
-            _window(env.notion, job_id, _now() + timedelta(seconds=idle))
         if time.monotonic() - started >= max_seconds:
             return _close(env)
+        rows = inbox.wait(max(0.0, min(50.0, idle - (time.monotonic() - last))))
+        if not rows and time.monotonic() - last >= idle:
+            _window(env.notion, job_id, None)  # cleared first, so a text after this starts a new run
+            rows = inbox.wait(0)  # and one last look for anything sent just before
+            if not rows:
+                return _close(env)
 
 
 def run(job_id: str, idle_minutes: float = 15.0, max_minutes: float = 80.0) -> dict:
@@ -166,20 +164,21 @@ def run(job_id: str, idle_minutes: float = 15.0, max_minutes: float = 80.0) -> d
     tg = Telegram()
     chat = config.require("TELEGRAM_CHAT_ID")
     claude = Claude(model=SONNET)
-
-    job = notion.get_page(job_id)
-    job_id = job["id"]  # the webhook passes it without dashes; other tables key on Notion's own form
-    ctx = ctxmod.build_context(notion, job)
-    env = Env(notion=notion, tg=tg, chat=chat, claude=claude, ctx=ctx, ids=ids,
-              assets=load_assets(notion, ids["Assets"], job_id),
-              history=restore_history(notion, ids["Inbox"], job_id))
-    inbox = _open_inbox(notion, ids, job_id)
-    if plain_select(job, "Status") in _START_STATUSES:
-        notion.update_page(job_id, {"Status": {"select": {"name": "Drafting"}}})
     idle = idle_minutes * 60
-    _window(notion, job_id, _now() + timedelta(seconds=idle))
     try:
-        return _chat(env, inbox, ids["Inbox"], idle, max_minutes * 60)
+        job = notion.get_page(job_id)
+        job_id = job["id"]  # the webhook passes it without dashes; other tables key on Notion's own form
+        inbox = _open_inbox(notion, ids, job_id)
+        rows = inbox.wait(0)
+        if not rows:  # the webhook saves a message first, so this run has nothing to do
+            return {"nothing": True}
+        ctx = ctxmod.build_context(notion, job)
+        env = Env(notion=notion, tg=tg, chat=chat, claude=claude, ctx=ctx, ids=ids,
+                  assets=load_assets(notion, ids["Assets"], job_id),
+                  history=restore_history(notion, ids["Inbox"], job_id))
+        if plain_select(job, "Status") in _START_STATUSES:
+            notion.update_page(job_id, {"Status": {"select": {"name": "Drafting"}}})
+        return _chat(env, inbox, ids["Inbox"], idle, max_minutes * 60, rows)
     except Exception:
         tg.send_message(chat, "⚠️ Something went wrong on my side. Nothing is lost. Text me to carry on and I'll pick it up.")
         raise

@@ -98,8 +98,12 @@ def _draft_form(claude, ctx: EditorContext, history: list[dict]) -> str:
     if not answers:
         raise NeedsInput("Paste the form's questions here and I'll answer them.")
     for item in answers:
+        if not item["answer"].strip():
+            continue
         if len(item["answer"].split()) >= _MIN_WORDS_TO_CHECK:
             item["answer"] = converse.enforce_voice(claude, ctx, item["answer"], "form answer")
+        else:  # right to work, notice period and years are short, and they still have to be true
+            item["answer"] = converse.fact_check(claude, ctx, item["answer"], "form answer")["corrected"]
     return json.dumps(answers, ensure_ascii=False)
 
 
@@ -126,6 +130,8 @@ def revise(claude, ctx: EditorContext, asset: Asset, instruction: str) -> tuple[
     if asset.kind == "form_answers":
         res = claude.json_call(converse.build_system(ctx), user, _REVISED_FORM,
                                tool_name="submit_revision", max_tokens=6000, temperature=0)
+        if len(res["answers"]) < len(json.loads(asset.text)):
+            return asset.text, "I didn't apply that, because some answers went missing. Try asking again."
         return json.dumps(res["answers"], ensure_ascii=False), res["note"]
     res = claude.json_call(converse.build_system(ctx), user, _REVISED,
                            tool_name="submit_revision", max_tokens=6000, temperature=0)

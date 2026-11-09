@@ -210,3 +210,13 @@ def test_message_fits_one_telegram_message():
          "candidate_my_read": huge, "why_you": [{"point": huge, "project": huge, "source_quote": "q"}] * 8,
          "weak_spots": [huge] * 6}
     assert len(_msg(brief=b)[0]) < 4096
+
+
+def test_a_post_with_only_checklist_items_offers_applied():
+    planned = [Planned("portfolio", "needed", "Portfolio link", "q")]
+    assert _msg(planned=planned)[1] == [[("✅ Applied", f"applied:{JID}")]]
+
+
+def test_rejected_lines_in_the_guide_cannot_prove_a_point():
+    guide = '[Acme, CV, 2026-11-09] Instead of "built a tool for bookers", Liam wrote "made a thing".'
+    assert verified_brief(BRIEF, cv="", mytone=guide)["why_you"] == []

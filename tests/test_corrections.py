@@ -167,3 +167,13 @@ def test_correction_uses_the_text_from_before_the_edit(monkeypatch):
     revise = {**ACTION, "type": "revise_asset", "instruction": "fix"}
     apply_actions(env, [revise, ACTION], "I built it.")
     assert any('"I invented it."' in line for _, line in n.appended)
+
+
+def test_a_fragment_cannot_become_a_fact():
+    assert entry(_a("fact_or_rule", words="led a"), "I never led a team", "", TAG) is None
+
+
+def test_a_tiny_never_line_is_ignored():
+    n = Notion()
+    save(n, _a("wording", "I invented it.", "I built it.", never="the"), "the I built it.", "I invented it.", TAG)
+    assert n.never == []

@@ -81,14 +81,17 @@ def _draft(env: Env, action: dict) -> str:
     return f"That's your {asset.label}. Tell me what to change.{_heads_up(env, asset)}"
 
 
-def _revise(env: Env, action: dict) -> str:
+def _revise(env: Env, action: dict, message: str = "") -> str:
     kind = action["kind"]
+    instruction = f"{action['instruction']}\n\nHis message, word for word: {message}"
     asset = _target(env, kind)
     if asset is None and not kind:
         return "Which one should I change?"
     if asset is None or not asset.text:
         return _not_drafted(kind or asset.kind)
-    text, note = drafts.revise(env.claude, env.ctx, asset, action["instruction"])
+    text, note = drafts.revise(env.claude, env.ctx, asset, instruction)
+    if text == asset.text:  # nothing changed, so don't reopen it or send it again
+        return note
     asset = _replace(env, save_text(env.notion, asset, text))
     deliver(env.tg, env.chat, env.ctx, asset)
     return note + _heads_up(env, asset)
@@ -143,7 +146,7 @@ def _correct(env: Env, action: dict, message: str, before: dict[str, str]) -> No
         env.ctx.mytone += "\n" + line
 
 
-_ACTIONS = {"draft_asset": _draft, "revise_asset": _revise, "skip_asset": _skip, "mark_final": _finish}
+_ACTIONS = {"draft_asset": _draft, "skip_asset": _skip, "mark_final": _finish}
 _FAILED = {"draft_asset": "write that", "revise_asset": "make that change", "skip_asset": "skip that",
            "mark_final": "mark that final", "drop_application": "drop this application", "list_jobs": "list your jobs",
            "save_correction": "save that"}
@@ -153,22 +156,30 @@ def apply_actions(env: Env, actions: list[dict], message: str) -> Done:
     """Run each action in order. One failing doesn't stop the rest, and Liam is told about it."""
     done = Done()
     before = {a.kind: a.text for a in env.assets}
+    dropping = any(a["type"] == "drop_application" for a in actions)
     for action in actions:
         kind = action["type"]
+        if dropping and kind != "save_correction":
+            continue  # what he told me still gets saved, wherever the drop came in his message
         try:
-            if kind == "drop_application":
-                _drop(env)
-                done.dropped = True
-                break
             if kind == "list_jobs":
                 _list_jobs(env)
             elif kind == "save_correction":
                 _correct(env, action, message, before)
+            elif kind == "revise_asset":
+                done.lines.append(_revise(env, action, message))
             else:
                 done.lines.append(_ACTIONS[kind](env, action))
         except Exception as e:
-            print(f"  ! {kind} failed: {e}")
+            print(f"  ! {kind} failed: {type(e).__name__}")  # the type only: these logs are public
             line = f"⚠️ I couldn't {_FAILED[kind]} ({type(e).__name__}). Nothing is lost, so try asking again."
             if line not in done.lines:
                 done.lines.append(line)
+    if dropping:
+        try:
+            _drop(env)
+            done.dropped = True
+        except Exception as e:
+            print(f"  ! drop failed: {type(e).__name__}")
+            done.lines.append(f"⚠️ I couldn't {_FAILED['drop_application']} ({type(e).__name__}). Nothing is lost, so try asking again.")
     return done

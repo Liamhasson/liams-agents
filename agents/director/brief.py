@@ -12,6 +12,7 @@ from typing import Optional
 
 from shared.assets import CHECKLIST_KINDS, DRAFTED_KINDS, LABELS, Planned
 from shared.quotes import appears_in
+from agents.editor.mytone import without_rejected
 
 _KIND = {"loom_or_video": "loom_script", "form_questions": "form_answers"}
 _STATE = {"required": "needed", "optional": "optional"}
@@ -105,7 +106,7 @@ def write_brief(claude, *, title: str, company: str, post: str, research: str, c
 
 def verified_brief(raw: dict, cv: str, mytone: str, post: Optional[str] = None) -> dict:
     """Remove every point and quote whose words aren't really in the source."""
-    sources = f"{cv}\n{mytone}"
+    sources = f"{cv}\n{without_rejected(mytone)}"
     brief = {**raw, "why_you": [p for p in raw.get("why_you", []) if appears_in(p.get("source_quote", ""), sources)]}
     if post is not None:
         for field in ("after_they_say", "candidate_they_say"):
@@ -150,7 +151,10 @@ def _compose(brief: dict, planned: list[Planned], form_checked: bool, title: str
         lines.append(f"• {html.escape(p.label)} ({'required' if p.state == 'needed' else 'optional'}{note})")
     if not form_checked:
         lines.append("I couldn't check the application form. Paste its questions here and I'll answer them.")
-    lines += ["", "Where do you want to start? Tap below or just text me."]
+    if any(p.kind in DRAFTED_KINDS for p in planned):
+        lines += ["", "Where do you want to start? Tap below or just text me."]
+    else:
+        lines += ["", "There's nothing for me to write here. Tap Applied once you've sent it."]
     return "\n".join(lines)
 
 
@@ -163,4 +167,4 @@ def brief_message(brief: dict, planned: list[Planned], form_checked: bool, jid: 
             break
     buttons = [[(f"✍️ {p.label}", f"start:{jid}:{p.kind}"), ("⏭ Skip", f"skipasset:{jid}:{p.kind}")]
                for p in planned if p.kind in DRAFTED_KINDS]
-    return text, buttons
+    return text, buttons or [[("✅ Applied", f"applied:{jid}")]]

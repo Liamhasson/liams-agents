@@ -432,8 +432,8 @@ def test_skip_button_needs_no_session():
     notion = FakeNotion(page=_ready())
     label, tg, _ = run(tap(f"skipasset:{JID}:cv"), notion)
     assert label == "asset-skipped" and notion.editor_started == []
-    assert notion.updates[-1] == {"State": {"select": {"name": "skipped"}}}
-    assert "CV" in tg.sent[-1][0]
+    assert {"State": {"select": {"name": "skipped"}}} in notion.updates
+    assert any("CV" in text for text, _ in tg.sent)
 
 
 def test_restore_returns_a_dropped_job_to_briefed():
@@ -463,3 +463,36 @@ def test_applied_works_without_a_session():
 def test_applied_twice_is_harmless():
     notion = FakeNotion(page=_ready(status="Applied"))
     assert run(tap(f"applied:{JID}"), notion)[0] == "already" and notion.updates == []
+
+
+def test_a_ready_to_send_job_can_still_be_edited_by_text():
+    notion = FakeNotion(ready=[_ready(status="Ready to send")])
+    assert run(msg("change the second line"), notion)[0] == "editor-started" and notion.editor_started == [JID]
+
+
+def test_ready_jobs_query_includes_ready_to_send():
+    assert "Ready to send" in handle.READY_STATUSES
+
+
+def test_skipping_the_last_asset_sends_the_checklist():
+    notion = FakeNotion(page=_ready())
+    _, tg, _ = run(tap(f"skipasset:{JID}:cv"), notion)
+    assert tg.sent[-1][1] == [[("✅ Applied", f"applied:{JID}")]]
+    assert {"Status": {"select": {"name": "Ready to send"}}} in notion.updates
+
+
+def test_reply_to_another_jobs_brief_during_a_chat_is_not_filed_under_this_one():
+    notion = FakeNotion(page=_ready(pid=OTHER_ID), live=_ready(), brief_for=900)
+    label, tg, _ = run(msg("drop it", reply_to=900), notion)
+    assert label == "busy" and notion.created == [] and "another" in tg.sent[-1][0]
+
+
+def test_reply_to_this_chats_brief_goes_to_the_chat():
+    notion = FakeNotion(page=_ready(), live=_ready(), brief_for=900)
+    assert run(msg("shorter", reply_to=900), notion)[0] == "inbox"
+
+
+def test_free_text_reply_to_an_unbriefed_card_does_not_open_another_job():
+    notion = FakeNotion(card_for=555, ready=[_ready(pid=OTHER_ID)])
+    label, tg, _ = run(msg("tell me about this", reply_to=555), notion)
+    assert label == "reply-help" and notion.editor_started == []

@@ -43,6 +43,7 @@ def voice(monkeypatch):
         seen.append((label, draft))
         return draft + " [checked]"
     monkeypatch.setattr(drafts.converse, "enforce_voice", fake)
+    monkeypatch.setattr(drafts.converse, "fact_check", lambda claude, ctx, draft, label: {"claims": [], "corrected": draft})
     return seen
 
 
@@ -192,3 +193,39 @@ def test_loom_prompt_asks_for_plain_text(voice):
     model = Model({"text": "x"})
     drafts.draft(model, _ctx(), _asset("loom_script"), [])
     assert "no markdown" in model.calls[0][1]
+
+
+def test_short_answers_are_still_fact_checked(monkeypatch, voice):
+    monkeypatch.setattr(drafts.converse, "fact_check", lambda c, x, d, l: {"claims": [], "corrected": ""})
+    out = drafts.draft(Model({"answers": [{"question": "Notice period?", "answer": "Two weeks"}]}),
+                       _ctx([{"label": "Notice period?", "required": True, "type": "text"}]), _asset("form_answers"), [])
+    assert json.loads(out)[0]["answer"] == "" and voice == []
+
+
+def test_blank_answers_are_not_fact_checked(monkeypatch, voice):
+    called = []
+    monkeypatch.setattr(drafts.converse, "fact_check", lambda *a: called.append(a) or {"corrected": ""})
+    drafts.draft(Model({"answers": [{"question": "Q", "answer": ""}]}),
+                 _ctx([{"label": "Q", "required": True, "type": "text"}]), _asset("form_answers"), [])
+    assert called == []
+
+
+def test_partial_form_revision_is_refused():
+    old = json.dumps([{"question": "A", "answer": "1"}, {"question": "B", "answer": "2"}])
+    text, note = drafts.revise(Model({"answers": [{"question": "A", "answer": "new"}], "note": "ok"}), _ctx(),
+                               _asset("form_answers", old), "x")
+    assert text == old and "didn't apply" in note
+
+
+def test_long_form_answer_is_split_in_code_blocks():
+    tg = Tg()
+    long = "word " * 1600
+    deliver(tg, "42", _ctx(), _asset("form_answers", json.dumps([{"question": "Why?", "answer": long}])))
+    assert len(tg.messages) > 1 and all(len(m) <= 4096 for m in tg.messages)
+    assert all(m.count("<code>") == 1 and m.count("</code>") == 1 for m in tg.messages)
+
+
+def test_escaped_entities_are_never_cut():
+    tg = Tg()
+    deliver(tg, "42", _ctx(), _asset("loom_script", "&" * 9000))
+    assert all(m.replace("&amp;", "") == "" for m in tg.messages)

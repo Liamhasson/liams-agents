@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from agents.editor.context import NeverAgain
 from agents.editor.context import EditorContext
-from agents.editor.converse import _rejected_block, build_system, lint
+from agents.editor.converse import _rejected_block, build_system, fact_check, lint, review
 
 NEVER = [
     NeverAgain("I've been a Replika user.", "Invented.", "shared"),
@@ -118,3 +118,38 @@ def test_brief_is_labelled_as_not_a_source_of_facts():
 
 def test_prompt_no_longer_assumes_a_cover_letter():
     assert "cover letter for this role or just the CV" not in build_system(_ctx())
+
+
+def test_weak_spots_never_reach_the_editor():
+    brief = "<b>Why you</b>\n• Strong\n\n<b>Weak spots</b>\n• No mobile work\n\n<b>What to send</b>\n• CV"
+    system = build_system(_ctx(brief=brief))
+    assert "No mobile work" not in system and "Strong" in system and "What to send" in system
+
+
+def test_fact_check_and_review_see_the_whole_post():
+    calls = []
+
+    class Model:
+        def json_call(self, system, user, schema, **k):
+            calls.append(system)
+            return {"problems": [], "corrected": "x", "claims": []}
+
+    post = "word " * 1000 + "LASTWORD"
+    ctx = _ctx(description=post)
+    fact_check(Model(), ctx, "d", "CV")
+    review(Model(), ctx, "d", "CV", [])
+    assert all("LASTWORD" in s for s in calls)
+
+
+def test_a_rejected_old_line_is_not_a_source_for_the_fact_check():
+    calls = []
+
+    class Model:
+        def json_call(self, system, user, schema, **k):
+            calls.append(system)
+            return {"claims": [], "corrected": "x"}
+
+    ctx = _ctx()
+    ctx.mytone = 'guide\n[Acme, CV, 2026-11-09] Instead of "I used their app", Liam wrote "I read about it".\n[Acme, CV, 2026-11-09] Liam said: "I freelance".'
+    fact_check(Model(), ctx, "d", "CV")
+    assert "I used their app" not in calls[0] and "I freelance" in calls[0]

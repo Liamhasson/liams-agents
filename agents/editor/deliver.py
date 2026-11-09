@@ -12,6 +12,7 @@ from .context import EditorContext
 
 OUTPUT_DIR = Path(__file__).resolve().parent.parent.parent / "output"
 _LIMIT = 4000  # Telegram's cap is 4,096
+_ANSWER_LIMIT = 3500  # leaves room for the question and <code> tags
 
 
 def split_message(text: str, limit: int = _LIMIT) -> list[str]:
@@ -36,6 +37,19 @@ def split_message(text: str, limit: int = _LIMIT) -> list[str]:
     return parts
 
 
+def safe_parts(text: str, limit: int = _LIMIT) -> list[str]:
+    """Split, then escape for Telegram, so an entity like &amp; is never cut in half."""
+    out: list[str] = []
+    for part in split_message(text, limit):
+        escaped = html.escape(part, quote=False)
+        if len(escaped) <= limit:
+            out.append(escaped)
+        else:
+            middle = len(part) // 2
+            out += safe_parts(part[:middle], limit) + safe_parts(part[middle:], limit)
+    return out
+
+
 def _slug(ctx: EditorContext) -> str:
     return ctx.company.replace(" ", "_").replace("/", "-")[:30] or "job"
 
@@ -52,10 +66,10 @@ def deliver(tg, chat, ctx: EditorContext, asset: Asset) -> None:
         for item in json.loads(asset.text):
             question = html.escape(item["question"], quote=False)
             if item["answer"].strip():
-                answer = html.escape(item["answer"], quote=False)
-                tg.send_message(chat, f"<b>{question}</b>\n<code>{answer}</code>")
+                for i, part in enumerate(safe_parts(item["answer"], _ANSWER_LIMIT)):
+                    tg.send_message(chat, f"<b>{question}</b>\n<code>{part}</code>" if i == 0 else f"<code>{part}</code>")
             else:
                 tg.send_message(chat, f"<b>{question}</b>\nOnly you can answer this one. It isn't in your CV or voice guide.")
     else:
-        for part in split_message(html.escape(asset.text, quote=False)):
+        for part in safe_parts(asset.text):
             tg.send_message(chat, part)

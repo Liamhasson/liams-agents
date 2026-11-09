@@ -218,3 +218,33 @@ def test_revised_loom_script_is_checked_too(env, monkeypatch):
     env.assets[1] = _asset("loom_script", "drafted", "old loom")
     monkeypatch.setattr(act.converse, "voice_issues", lambda ctx, text, kind: ["dash in a sentence"])
     assert "Heads up" in apply_actions(env, [_act("revise_asset", "loom_script", "x")], "x").lines[0]
+
+
+def test_anything_after_a_drop_that_saves_a_correction_still_runs(env, monkeypatch):
+    saved = []
+    monkeypatch.setattr(act, "_correct", lambda e, a, m, b: saved.append(True))
+    done = apply_actions(env, [_act("drop_application"), _act("save_correction"), _act("draft_asset", "cv")], "x")
+    assert saved == [True] and done.dropped and env.delivered == []
+
+
+def test_revise_receives_his_own_message(env, monkeypatch):
+    seen = []
+    monkeypatch.setattr(act.drafts, "revise", lambda c, x, a, i: (seen.append(i), ("new", "ok"))[1])
+    env.assets[0] = _asset("cv", "drafted", "old")
+    apply_actions(env, [_act("revise_asset", "cv", "their summary")], 'say "I built it"')
+    assert 'say "I built it"' in seen[0]
+
+
+def test_a_refused_change_leaves_a_final_asset_alone(env, monkeypatch):
+    monkeypatch.setattr(act.drafts, "revise", lambda c, x, a, i: (a.text, "I didn't apply that."))
+    env.assets[0] = _asset("cv", "final", "old")
+    done = apply_actions(env, [_act("revise_asset", "cv", "x")], "x")
+    assert env.assets[0].state == "final" and env.delivered == [] and "didn't apply" in done.lines[0]
+
+
+def test_failures_do_not_print_model_text(env, monkeypatch, capsys):
+    def boom(*a):
+        raise RuntimeError("SECRET DRAFT TEXT")
+    monkeypatch.setattr(act.drafts, "draft", boom)
+    apply_actions(env, [_act("draft_asset", "cv")], "go")
+    assert "SECRET" not in capsys.readouterr().out

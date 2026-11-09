@@ -143,7 +143,8 @@ def run(limit: int | None = None, dry_run: bool = False, job_id: str | None = No
             print(f"  ! research failed for {title[:40]}: {e}")
             continue
         notes = _notes_text(res, site_read=bool(site_text))
-        print(f"\n— {title} @ {company} —\n{notes}\n")
+        if dry_run:  # Actions logs are public, so a real run doesn't print which job Liam chose
+            print(f"\n— {title} @ {company} —\n{notes}\n")
         if not dry_run:
             notion.update_page(page["id"], {"Research notes": _long_rt(notes)})
         done += 1

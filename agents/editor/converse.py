@@ -18,6 +18,7 @@ import re
 from shared.claude import Claude
 from . import references
 from .context import NeverAgain, EditorContext
+from .mytone import without_rejected
 
 WRITER_TEMP = 0.2  # low: hug Liam's examples, resist generic drift
 
@@ -139,6 +140,11 @@ def _references_section(ctx: EditorContext, kind: str | None = None) -> str:
     return f"\n{REFERENCE_RULES}\n\n=== APPROVED REFERENCES ===\n{text}\n=== END REFERENCES ===\n" if text else ""
 
 
+def _angle(brief: str) -> str:
+    """The brief without its weak spots, which are for Liam only and never go in an asset."""
+    return re.sub(r"<b>Weak spots</b>.*?(?=<b>|\Z)", "", brief or "", flags=re.S).strip()
+
+
 def build_system(ctx: EditorContext, with_references: bool = False) -> str:
     refs = _references_section(ctx) if with_references else ""
     return f"""You are Liam Hasson's Editor. You write the assets his job application needs and
@@ -187,7 +193,7 @@ Company research notes:
 === END JOB ===
 
 === DIRECTOR'S BRIEF (sets the angle, is not a source of facts) ===
-{ctx.brief or '(none)'}
+{_angle(ctx.brief) or '(none)'}
 === END BRIEF ===
 """
 
@@ -295,7 +301,7 @@ def review(claude: Claude, ctx: EditorContext, draft: str, label: str,
         + "\n\n=== VOICE GUIDE ===\n" + ctx.mytone
         + "\n=== END GUIDE ===\n\n=== CURRENT CV ===\n" + (ctx.base_cv or "(none)")
         + "\n=== END CV ===\n\n=== JOB POST AND RESEARCH ===\n"
-        + f"{ctx.title} at {ctx.company}\n{ctx.description[:3000]}\n\n{ctx.research or ''}"
+        + f"{ctx.title} at {ctx.company}\n{ctx.description}\n\n{ctx.research or ''}"
         + "\n=== END JOB ==="
     )
     hint =f"The automatic check already found: {', '.join(lint_issues)}\n\n" if lint_issues else ""
@@ -349,8 +355,8 @@ def fact_check(claude: Claude, ctx: EditorContext, draft: str, label: str) -> di
         "markdown structure, and keep the sentences around a cut connected.\n\n"
         "=== SOURCE 1: CURRENT CV ===\n" + (ctx.base_cv or "(none)")
         + "\n=== END SOURCE 1 ===\n\n=== SOURCE 2: VOICE GUIDE (sections 9 to 12 hold his facts) ===\n"
-        + ctx.mytone + "\n=== END SOURCE 2 ===\n\n=== SOURCE 3: JOB POST AND RESEARCH ===\n"
-        + f"{ctx.title} at {ctx.company}\n{ctx.description[:3000]}\n\n{ctx.research or ''}"
+        + without_rejected(ctx.mytone) + "\n=== END SOURCE 2 ===\n\n=== SOURCE 3: JOB POST AND RESEARCH ===\n"
+        + f"{ctx.title} at {ctx.company}\n{ctx.description}\n\n{ctx.research or ''}"
         + "\n=== END SOURCE 3 ==="
     )
     return claude.json_call(system, f"{label} to fact-check:\n\n{draft}", _FACT_SCHEMA,

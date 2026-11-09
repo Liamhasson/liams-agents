@@ -6,6 +6,7 @@ their full text here, so a chat can close and pick up again with nothing lost.
 
 from __future__ import annotations
 
+import html
 from dataclasses import dataclass, replace
 from typing import Optional
 
@@ -101,6 +102,18 @@ def save_text(notion, asset: Asset, text: str) -> Asset:
 def set_state(notion, asset: Asset, state: str) -> Asset:
     notion.update_page(asset.page_id, {"State": {"select": {"name": state}}})
     return replace(asset, state=state)
+
+
+def checklist_message(assets: list[Asset], url: str, jid: str) -> tuple[str, list]:
+    """What's ready, what's skipped, what's Liam's to do, and the link to apply."""
+    lines = ["✅ <b>Before you apply</b>", ""]
+    for a in assets:
+        mark = {"final": "Ready", "skipped": "Skipped", "optional": "Optional, not written"}.get(a.state, "Yours to handle")
+        lines.append(f"• {html.escape(a.label, quote=False)}: {mark}")
+    if url:
+        lines += ["", html.escape(url, quote=False)]
+    lines += ["", "Read each one once more, then tap Applied when you've sent it."]
+    return "\n".join(lines), [[("✅ Applied", f"applied:{jid}")]]
 
 
 def find(assets: list[Asset], kind: str) -> Optional[Asset]:
