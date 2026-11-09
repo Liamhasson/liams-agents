@@ -8,13 +8,14 @@ from __future__ import annotations
 
 import html
 from dataclasses import dataclass, field
+from datetime import date
 from typing import Optional
 
 from shared.assets import (CHECKLIST_KINDS, DRAFTED_KINDS, LABELS, Asset, Planned, create_assets, find, save_text,
                            set_state)
 from .context import EditorContext
 from .deliver import deliver
-from . import converse, drafts, learn
+from . import converse, corrections, drafts, learn
 
 
 @dataclass
@@ -130,7 +131,13 @@ def _list_jobs(env: Env) -> None:
 
 
 def _correct(env: Env, action: dict, message: str, before: dict[str, str]) -> None:
-    """Filled in by the silent corrections step."""
+    """Save it to the voice guide with no message to Liam. The next draft can use it straight away."""
+    kind = action["kind"]
+    text = before.get(kind, "") if kind else "\n".join(before.values())
+    tag = f"{env.ctx.company}, {LABELS.get(kind, 'general')}, {date.today().isoformat()}"
+    line = corrections.save(env.notion, action, message, text, tag)
+    if line:
+        env.ctx.mytone += "\n" + line
 
 
 _ACTIONS = {"draft_asset": _draft, "revise_asset": _revise, "skip_asset": _skip, "mark_final": _finish}
@@ -158,5 +165,7 @@ def apply_actions(env: Env, actions: list[dict], message: str) -> Done:
                 done.lines.append(_ACTIONS[kind](env, action))
         except Exception as e:
             print(f"  ! {kind} failed: {e}")
-            done.lines.append(f"⚠️ I couldn't {_FAILED[kind]} ({type(e).__name__}). Nothing is lost, so try asking again.")
+            line = f"⚠️ I couldn't {_FAILED[kind]} ({type(e).__name__}). Nothing is lost, so try asking again."
+            if line not in done.lines:
+                done.lines.append(line)
     return done
