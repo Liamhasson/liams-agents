@@ -15,7 +15,8 @@ from shared.quotes import appears_in
 
 _KIND = {"loom_or_video": "loom_script", "form_questions": "form_answers"}
 _STATE = {"required": "needed", "optional": "optional"}
-_MAX_FIELD = 200  # keeps the whole brief inside one Telegram message
+_FIELD_LIMITS = (500, 350, 250, 150)  # longest line first, tighter only if the brief won't fit one message
+_MESSAGE_LIMIT = 4000
 
 BRIEF_SCHEMA: dict = {
     "type": "object",
@@ -31,7 +32,7 @@ BRIEF_SCHEMA: dict = {
             "properties": {
                 "point": {"type": "string", "description": "Why he solves their problem, one line, said to him as 'you'."},
                 "project": {"type": "string", "description": "The real project or job it comes from."},
-                "source_quote": {"type": "string", "description": "Exact words from his CV or voice guide that prove it."},
+                "source_quote": {"type": "string", "description": "5 to 12 words copied exactly from his CV or voice guide that prove it."},
             },
             "required": ["point", "project", "source_quote"],
         }},
@@ -112,33 +113,33 @@ def verified_brief(raw: dict, cv: str, mytone: str, post: Optional[str] = None) 
     return brief
 
 
-def _short(text: str) -> str:
+def _short(text: str, limit: int) -> str:
     text = " ".join((text or "").split())
-    return html.escape(text if len(text) <= _MAX_FIELD else text[:_MAX_FIELD - 1].rstrip() + "…")
+    return html.escape(text if len(text) <= limit else text[:limit - 1].rstrip() + "…", quote=False)
 
 
-def _section(title: str, says: list[str], read: str) -> list[str]:
+def _section(title: str, says: list[str], read: str, limit: int) -> list[str]:
     lines = [f"<b>{title}</b>"]
     if says:
-        lines.append("They say: " + " ".join(f"“{_short(q)}”" for q in says[:2]))
+        lines.append("They say: " + " ".join(f"“{_short(q, limit)}”" for q in says[:2]))
     if read:
-        lines.append(f"My read: {_short(read)}")
+        lines.append(f"My read: {_short(read, limit)}")
     return lines + [""]
 
 
-def brief_message(brief: dict, planned: list[Planned], form_checked: bool, jid: str,
-                  title: str, company: str) -> tuple[str, list]:
-    lines = [f"🎬 <b>{_short(title)}</b> at <b>{_short(company)}</b>", ""]
-    lines += _section("What they're after", brief.get("after_they_say", []), brief.get("after_my_read", ""))
-    lines += _section("The candidate they want", brief.get("candidate_they_say", []), brief.get("candidate_my_read", ""))
+def _compose(brief: dict, planned: list[Planned], form_checked: bool, title: str, company: str, limit: int) -> str:
+    lines = [f"🎬 <b>{_short(title, limit)}</b> at <b>{_short(company, limit)}</b>", ""]
+    lines += _section("What they're after", brief.get("after_they_say", []), brief.get("after_my_read", ""), limit)
+    lines += _section("The candidate they want", brief.get("candidate_they_say", []),
+                      brief.get("candidate_my_read", ""), limit)
 
     if brief.get("why_you"):
         lines.append("<b>Why you</b>")
-        lines += [f"• {_short(p['point'])} <i>({_short(p['project'])})</i>" for p in brief["why_you"][:4]]
+        lines += [f"• {_short(p['point'], limit)} <i>({_short(p['project'], limit)})</i>" for p in brief["why_you"][:4]]
         lines.append("")
     if brief.get("weak_spots"):
         lines.append("<b>Weak spots</b>")
-        lines += [f"• {_short(w)}" for w in brief["weak_spots"][:3]]
+        lines += [f"• {_short(w, limit)}" for w in brief["weak_spots"][:3]]
         lines.append("")
 
     lines.append("<b>What to send</b>")
@@ -149,8 +150,17 @@ def brief_message(brief: dict, planned: list[Planned], form_checked: bool, jid: 
         lines.append(f"• {html.escape(p.label)} ({'required' if p.state == 'needed' else 'optional'}{note})")
     if not form_checked:
         lines.append("I couldn't check the application form. Paste its questions here and I'll answer them.")
-
     lines += ["", "Where do you want to start? Tap below or just text me."]
+    return "\n".join(lines)
+
+
+def brief_message(brief: dict, planned: list[Planned], form_checked: bool, jid: str,
+                  title: str, company: str) -> tuple[str, list]:
+    text = ""
+    for limit in _FIELD_LIMITS:
+        text = _compose(brief, planned, form_checked, title, company, limit)
+        if len(text) < _MESSAGE_LIMIT:
+            break
     buttons = [[(f"✍️ {p.label}", f"start:{jid}:{p.kind}"), ("⏭ Skip", f"skipasset:{jid}:{p.kind}")]
                for p in planned if p.kind in DRAFTED_KINDS]
-    return "\n".join(lines), buttons
+    return text, buttons

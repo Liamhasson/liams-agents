@@ -195,6 +195,15 @@ def test_message_escapes_html():
     assert "&lt;b&gt;" in _msg(brief={**BRIEF, "after_my_read": "<b>bold</b>"})[0]
 
 
+def test_a_normal_length_read_is_not_cut_off():
+    read = "They want someone who already builds with these tools every day. " * 5
+    assert read.strip() in _msg(brief={**BRIEF, "after_my_read": read})[0]
+
+
+def test_apostrophes_stay_readable():
+    assert "don't" in _msg(brief={**BRIEF, "after_my_read": "They don't know yet."})[0]
+
+
 def test_message_fits_one_telegram_message():
     huge = "word " * 2000
     b = {"after_they_say": [huge] * 5, "after_my_read": huge, "candidate_they_say": [huge] * 5,
